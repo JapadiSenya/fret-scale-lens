@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>fret-scale-lens</title>
+<meta name="description" content="弦楽器のフレットボード上の音名表示と、キー・スケールに対応するフレット位置をハイライト表示するツール">
+<meta property="og:title" content="fret-scale-lens">
+<meta property="og:description" content="弦楽器のフレットボード上の音名表示と、キー・スケールに対応するフレット位置をハイライト表示するツール">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="app-header">
+  <h1>fret-scale-lens</h1>
+</header>
+
+<main>
+  <section class="controls" aria-label="コントロール">
+    <div class="control-group">
+      <label for="key-select">キー</label>
+      <select id="key-select"></select>
+    </div>
+
+    <div class="control-group">
+      <label for="scale-select">スケール</label>
+      <select id="scale-select"></select>
+    </div>
+
+    <div class="control-group">
+      <label for="preset-select">チューニングプリセット</label>
+      <select id="preset-select"></select>
+    </div>
+
+    <div class="control-group">
+      <button id="tuning-detail-btn" type="button">チューニング詳細設定</button>
+    </div>
+  </section>
+
+  <section id="fretboard-container" class="fretboard-container" aria-label="フレットボード"></section>
+</main>
+
+<dialog id="tuning-dialog">
+  <form method="dialog" class="tuning-form">
+    <h2>チューニング詳細設定</h2>
+
+    <div class="control-group">
+      <label for="fret-count-input">フレット数</label>
+      <input type="number" id="fret-count-input" min="1" max="36">
+    </div>
+
+    <div id="string-list" class="string-list"></div>
+
+    <button type="button" id="add-string-btn">弦を追加</button>
+
+    <div class="dialog-actions">
+      <button type="submit">閉じる</button>
+    </div>
+  </form>
+</dialog>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
