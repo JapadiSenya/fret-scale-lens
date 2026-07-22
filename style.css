@@ -13,6 +13,13 @@
   --color-in-scale-text: #ffffff;
   --color-muted-fill: #ffffff;
   --color-muted-stroke: #c9c4b8;
+  --color-position-marker: #cfc9bb;
+  --color-function-t: #c2703a;
+  --color-function-s: #3f9142;
+  --color-function-d: #2f6fb0;
+  --color-function-neutral: #8a5fb0;
+  --color-function-text: #ffffff;
+  --color-root-accent-border: #2a2a28;
 }
 
 * {
@@ -99,6 +106,64 @@ button:disabled {
   cursor: not-allowed;
 }
 
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 0 4px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.legend-swatch.root {
+  background: var(--color-root);
+}
+
+.legend-swatch.in-scale {
+  background: var(--color-in-scale);
+}
+
+.legend-swatch.muted {
+  background: var(--color-muted-fill);
+  border: 1px solid var(--color-muted-stroke);
+}
+
+.legend-swatch.function-t {
+  background: var(--color-function-t);
+}
+
+.legend-swatch.function-s {
+  background: var(--color-function-s);
+}
+
+.legend-swatch.function-d {
+  background: var(--color-function-d);
+}
+
+.legend-swatch.function-neutral {
+  background: var(--color-function-neutral);
+}
+
+.legend-swatch.root-accent {
+  background: var(--color-function-t);
+  border: 3px solid var(--color-root-accent-border);
+}
+
 .fretboard-container {
   width: 100%;
   background: var(--color-panel);
@@ -130,6 +195,10 @@ button:disabled {
 .fret-number {
   fill: var(--color-text-muted);
   font-size: 12px;
+}
+
+.position-marker {
+  fill: var(--color-position-marker);
 }
 
 .string-label {
@@ -168,6 +237,27 @@ button:disabled {
   fill: var(--color-muted-fill);
   stroke: var(--color-muted-stroke);
   stroke-width: 1;
+}
+
+.note-circle.function-t {
+  fill: var(--color-function-t);
+}
+
+.note-circle.function-s {
+  fill: var(--color-function-s);
+}
+
+.note-circle.function-d {
+  fill: var(--color-function-d);
+}
+
+.note-circle.function-neutral {
+  fill: var(--color-function-neutral);
+}
+
+.note-circle.root-accent {
+  stroke: var(--color-root-accent-border);
+  stroke-width: 3;
 }
 
 .note-text {

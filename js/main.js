@@ -1,7 +1,7 @@
 // 初期化・イベントバインド
 
 import { NOTE_NAMES, frequencyOf } from './notes.js';
-import { SCALE_LIST } from './scales.js';
+import { SCALE_LIST, FUNCTION_LABELS } from './scales.js';
 import {
   TUNING_PRESETS,
   findPreset,
@@ -30,6 +30,13 @@ const fretCountInput = document.getElementById('fret-count-input');
 const stringListEl = document.getElementById('string-list');
 const addStringBtn = document.getElementById('add-string-btn');
 const fretboardContainer = document.getElementById('fretboard-container');
+const displayModeToggle = document.getElementById('display-mode-toggle');
+const legendEl = document.getElementById('legend');
+
+const DISPLAY_MODE_LABELS = {
+  scale: 'スケール構成音',
+  function: '機能和声(T/S/D)',
+};
 
 function populateStaticSelects() {
   keySelect.replaceChildren(...NOTE_NAMES.map((n) => new Option(n, n)));
@@ -51,6 +58,12 @@ function syncControlsFromState() {
   fretCountInput.value = state.fretCount;
   const matchedPreset = TUNING_PRESETS.find((p) => sameTuning(p.strings, state.tuning));
   presetSelect.value = matchedPreset ? matchedPreset.id : CUSTOM_PRESET_VALUE;
+  syncDisplayModeToggle();
+}
+
+function syncDisplayModeToggle() {
+  displayModeToggle.textContent = `表示: ${DISPLAY_MODE_LABELS[state.displayMode]}`;
+  displayModeToggle.setAttribute('aria-pressed', String(state.displayMode === 'function'));
 }
 
 function persistAndRender() {
@@ -64,6 +77,40 @@ function render() {
       playFrequency(frequencyOf(note.name, note.octave));
     },
   });
+  renderLegend();
+}
+
+function renderLegend() {
+  const items =
+    state.displayMode === 'function'
+      ? [
+          { swatchClass: 'function-t', label: `${FUNCTION_LABELS.T} (T)` },
+          { swatchClass: 'function-s', label: `${FUNCTION_LABELS.S} (S)` },
+          { swatchClass: 'function-d', label: `${FUNCTION_LABELS.D} (D)` },
+          { swatchClass: 'function-neutral', label: 'ブルーノートなど(機能なし)' },
+          { swatchClass: 'root-accent', label: 'ルート(太枠で強調)' },
+        ]
+      : [
+          { swatchClass: 'root', label: 'ルート' },
+          { swatchClass: 'in-scale', label: 'スケール構成音' },
+          { swatchClass: 'muted', label: 'スケール外' },
+        ];
+
+  legendEl.replaceChildren(
+    ...items.map(({ swatchClass, label }) => {
+      const item = document.createElement('span');
+      item.className = 'legend-item';
+
+      const swatch = document.createElement('span');
+      swatch.className = `legend-swatch ${swatchClass}`;
+
+      const text = document.createElement('span');
+      text.textContent = label;
+
+      item.append(swatch, text);
+      return item;
+    })
+  );
 }
 
 function renderStringList() {
@@ -159,6 +206,12 @@ addStringBtn.addEventListener('click', () => {
 
 tuningDetailBtn.addEventListener('click', () => {
   tuningDialog.showModal();
+});
+
+displayModeToggle.addEventListener('click', () => {
+  state.displayMode = state.displayMode === 'function' ? 'scale' : 'function';
+  syncDisplayModeToggle();
+  persistAndRender();
 });
 
 window.addEventListener('resize', debounce(render, 150));
