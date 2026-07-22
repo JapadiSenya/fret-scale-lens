@@ -1,7 +1,7 @@
 // SVGによるフレットボード描画
 
 import { NOTE_NAMES, noteAtFret } from './notes.js';
-import { isInScale, isRootNote } from './scales.js';
+import { isInScale, isRootNote, getDegreeInfo } from './scales.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -9,11 +9,20 @@ const LABEL_WIDTH = 60; // 開放弦の音名ラベル用の幅
 const OPEN_COL_WIDTH = 50; // 開放弦(0フレット)マーカー用の幅
 const MARGIN_RIGHT = 24;
 const MARGIN_TOP = 24;
-const MARGIN_BOTTOM = 34;
+const MARGIN_BOTTOM = 46;
 const ROW_HEIGHT = 46;
 const NOTE_RADIUS = 15;
 const MUTED_RADIUS = 9;
 const MIN_WIDTH = 480;
+
+const MARKER_Y_OFFSET = 22; // 最下段の弦からポジションマーク中心までの距離
+const NUMBER_Y_OFFSET = 40; // 最下段の弦からフレット番号テキストまでの距離
+const MARKER_RADIUS = 4;
+const DOUBLE_MARKER_GAP = 8;
+
+// 実物のネックと同様のポジションマーク配置
+const SINGLE_MARKER_FRETS = new Set([3, 5, 7, 9, 15, 17, 19, 21]);
+const DOUBLE_MARKER_FRETS = new Set([12, 24]);
 
 function createSvgElement(tag, attrs = {}, text) {
   const node = document.createElementNS(SVG_NS, tag);
@@ -26,11 +35,11 @@ function createSvgElement(tag, attrs = {}, text) {
 
 /**
  * @param {HTMLElement} container
- * @param {{tuning: {name:string, octave:number}[], fretCount: number, key: string, scale: string}} state
+ * @param {{tuning: {name:string, octave:number}[], fretCount: number, key: string, scale: string, displayMode?: 'scale'|'function'}} state
  * @param {{onNoteClick?: (stringIndex:number, fret:number, note:{name:string, octave:number}) => void}} [callbacks]
  */
 export function renderFretboard(container, state, { onNoteClick } = {}) {
-  const { tuning, fretCount, key, scale } = state;
+  const { tuning, fretCount, key, scale, displayMode = 'scale' } = state;
   const rootIndex = NOTE_NAMES.indexOf(key);
 
   // 表示上は高音弦を上、低音弦を下にする
@@ -41,7 +50,7 @@ export function renderFretboard(container, state, { onNoteClick } = {}) {
   const marginLeft = LABEL_WIDTH + OPEN_COL_WIDTH;
   const boardWidth = Math.max(width - marginLeft - MARGIN_RIGHT, fretCount * 20);
   const colWidth = boardWidth / fretCount;
-  const height = MARGIN_TOP + (stringCount - 1) * ROW_HEIGHT + MARGIN_BOTTOM + 20;
+  const height = MARGIN_TOP + (stringCount - 1) * ROW_HEIGHT + MARGIN_BOTTOM + 12;
 
   const nutX = marginLeft;
   const openX = LABEL_WIDTH + OPEN_COL_WIDTH / 2;
@@ -78,18 +87,28 @@ export function renderFretboard(container, state, { onNoteClick } = {}) {
     })
   );
 
-  // フレット番号
+  // ポジションマーク(インレイ)・フレット番号
+  const markerY = bottomY + MARKER_Y_OFFSET;
   for (let fret = 1; fret <= fretCount; fret++) {
+    const cx = fretCenterX(fret);
+
+    if (DOUBLE_MARKER_FRETS.has(fret)) {
+      svg.appendChild(createSvgElement('circle', { cx, cy: markerY - DOUBLE_MARKER_GAP, r: MARKER_RADIUS, class: 'position-marker' }));
+      svg.appendChild(createSvgElement('circle', { cx, cy: markerY + DOUBLE_MARKER_GAP, r: MARKER_RADIUS, class: 'position-marker' }));
+    } else if (SINGLE_MARKER_FRETS.has(fret)) {
+      svg.appendChild(createSvgElement('circle', { cx, cy: markerY, r: MARKER_RADIUS, class: 'position-marker' }));
+    }
+
     svg.appendChild(
       createSvgElement('text', {
-        x: fretCenterX(fret), y: bottomY + MARGIN_BOTTOM,
+        x: cx, y: bottomY + NUMBER_Y_OFFSET,
         class: 'fret-number', 'text-anchor': 'middle',
       }, String(fret))
     );
   }
   svg.appendChild(
     createSvgElement('text', {
-      x: openX, y: bottomY + MARGIN_BOTTOM,
+      x: openX, y: bottomY + NUMBER_Y_OFFSET,
       class: 'fret-number', 'text-anchor': 'middle',
     }, '開放')
   );
@@ -118,8 +137,35 @@ export function renderFretboard(container, state, { onNoteClick } = {}) {
       const note = noteAtFret(openNote.name, openNote.octave, fret);
       const noteIndex = NOTE_NAMES.indexOf(note.name);
       const root = isRootNote(noteIndex, rootIndex);
-      const inScale = isInScale(noteIndex, rootIndex, scale);
       const x = fret === 0 ? openX : fretCenterX(fret);
+
+      let circleClass;
+      let textClass;
+      let labelText;
+      let highlighted;
+
+      if (displayMode === 'function') {
+        const degreeInfo = getDegreeInfo(noteIndex, rootIndex, scale);
+        highlighted = Boolean(degreeInfo);
+        if (degreeInfo) {
+          const funcClass = degreeInfo.func ? `function-${degreeInfo.func.toLowerCase()}` : 'function-neutral';
+          circleClass = `note-circle ${funcClass}${root ? ' root-accent' : ''}`;
+          textClass = 'note-text';
+          labelText = degreeInfo.roman;
+        } else {
+          circleClass = 'note-circle muted';
+          textClass = 'note-text muted';
+          labelText = note.name;
+        }
+      } else {
+        const inScale = isInScale(noteIndex, rootIndex, scale);
+        highlighted = root || inScale;
+        circleClass = root ? 'note-circle root' : inScale ? 'note-circle in-scale' : 'note-circle muted';
+        textClass = highlighted ? 'note-text' : 'note-text muted';
+        labelText = note.name;
+      }
+
+      const radius = highlighted ? NOTE_RADIUS : MUTED_RADIUS;
 
       const group = createSvgElement('g', {
         class: 'note-cell',
@@ -128,14 +174,9 @@ export function renderFretboard(container, state, { onNoteClick } = {}) {
         'aria-label': `${note.name}${note.octave} を再生`,
       });
 
-      const highlighted = root || inScale;
-      const radius = highlighted ? NOTE_RADIUS : MUTED_RADIUS;
-      const circleClass = root ? 'note-circle root' : inScale ? 'note-circle in-scale' : 'note-circle muted';
-      const textClass = highlighted ? 'note-text' : 'note-text muted';
-
       group.appendChild(createSvgElement('circle', { cx: x, cy: y, r: radius, class: circleClass }));
       group.appendChild(
-        createSvgElement('text', { x, y: y + 4, class: textClass, 'text-anchor': 'middle' }, note.name)
+        createSvgElement('text', { x, y: y + 4, class: textClass, 'text-anchor': 'middle' }, labelText)
       );
 
       const handleActivate = () => onNoteClick?.(originalIndex, fret, note);

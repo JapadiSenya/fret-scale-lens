@@ -10,6 +10,7 @@ export function defaultSettings() {
     fretCount: DEFAULT_FRET_COUNT,
     key: 'C',
     scale: 'major',
+    displayMode: 'scale',
   };
 }
 
