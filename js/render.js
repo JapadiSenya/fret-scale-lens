@@ -9,14 +9,15 @@ const LABEL_WIDTH = 60; // 開放弦の音名ラベル用の幅
 const OPEN_COL_WIDTH = 50; // 開放弦(0フレット)マーカー用の幅
 const MARGIN_RIGHT = 24;
 const MARGIN_TOP = 24;
-const MARGIN_BOTTOM = 46;
+const MARGIN_BOTTOM = 76;
 const ROW_HEIGHT = 46;
 const NOTE_RADIUS = 15;
 const MUTED_RADIUS = 9;
 const MIN_WIDTH = 480;
 
-const MARKER_Y_OFFSET = 22; // 最下段の弦からポジションマーク中心までの距離
-const NUMBER_Y_OFFSET = 40; // 最下段の弦からフレット番号テキストまでの距離
+// 最下段の弦のノート円(半径NOTE_RADIUS、ルート強調枠込み)と重ならないだけの余白を確保する
+const MARKER_Y_OFFSET = 34; // 最下段の弦からポジションマーク中心までの距離
+const NUMBER_Y_OFFSET = 60; // 最下段の弦からフレット番号テキストまでの距離
 const MARKER_RADIUS = 4;
 const DOUBLE_MARKER_GAP = 8;
 
