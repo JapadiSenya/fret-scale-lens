@@ -81,6 +81,9 @@ const tabExportBtn = document.getElementById('tab-export-btn');
 const tabImportBtn = document.getElementById('tab-import-btn');
 const tabImportInput = document.getElementById('tab-import-input');
 const tabDisplay = document.getElementById('tab-display');
+const tabJsonDetails = document.getElementById('tab-json-details');
+const tabJsonTextarea = document.getElementById('tab-json-textarea');
+const tabJsonError = document.getElementById('tab-json-error');
 
 let tabLibrary = loadTabLibrary();
 let tabData = tabLibrary.tabs[0];
@@ -380,6 +383,7 @@ function renderTabView() {
   );
   syncTabButtons();
   scrollTabIntoView();
+  syncTabJsonView();
 }
 
 // 再生位置・選択位置・末尾への新規入力に合わせて、TAB表示エリアの横スクロールを追従させる
@@ -388,6 +392,151 @@ function scrollTabIntoView() {
   if (focusIndex == null || focusIndex < 0) return;
   const col = tabDisplay.querySelectorAll('.tab-col')[focusIndex];
   col?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+}
+
+// --- JSON直接編集 ---
+
+function isFlatObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+// {"key":"value",...} → {"key": "value", ...} のようにコロン・カンマの後ろにスペースを補う(1オブジェクト1行表示用)
+function formatFlatObjectLine(obj) {
+  return JSON.stringify(obj).replace(/":/g, '": ').replace(/,"/g, ', "');
+}
+
+// tabDataをJSON整形するが、3階層目(notes/tempoEventsの各要素)のオブジェクトは
+// 1音符・1イベントごとに視認しやすいよう1行にまとめて出力する
+function formatTabDataJson(data) {
+  const keys = Object.keys(data);
+  const lines = ['{'];
+  keys.forEach((key, i) => {
+    const value = data[key];
+    const suffix = i === keys.length - 1 ? '' : ',';
+    if (Array.isArray(value) && value.length > 0 && value.every(isFlatObject)) {
+      lines.push(`  ${JSON.stringify(key)}: [`);
+      value.forEach((item, j) => {
+        lines.push(`    ${formatFlatObjectLine(item)}${j === value.length - 1 ? '' : ','}`);
+      });
+      lines.push(`  ]${suffix}`);
+    } else {
+      lines.push(`  ${JSON.stringify(key)}: ${JSON.stringify(value)}${suffix}`);
+    }
+  });
+  lines.push('}');
+  return lines.join('\n');
+}
+
+// 整形済みJSON文字列中の "notes" 配列の各要素([開始オフセット, 終了オフセット])を、
+// 文字列/括弧のネストを考慮しつつ走査して求める(notes配列のインデックスと1対1で対応する)
+function computeNoteJsonRanges(jsonText) {
+  const bracketStart = jsonText.indexOf('[', jsonText.indexOf('"notes"'));
+  if (bracketStart === -1) return [];
+
+  const ranges = [];
+  let depth = 0;
+  let inString = false;
+  let escapeNext = false;
+  let elementStart = -1;
+
+  for (let i = bracketStart; i < jsonText.length; i++) {
+    const ch = jsonText[i];
+    if (inString) {
+      if (escapeNext) escapeNext = false;
+      else if (ch === '\\') escapeNext = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '[' || ch === '{') {
+      if (depth === 1 && ch === '{') elementStart = i;
+      depth++;
+    } else if (ch === ']' || ch === '}') {
+      depth--;
+      if (depth === 1 && ch === '}') ranges.push([elementStart, i + 1]);
+      if (depth === 0 && ch === ']') break;
+    }
+  }
+  return ranges;
+}
+
+function setTabJsonError(message) {
+  tabJsonError.textContent = message;
+  tabJsonError.classList.toggle('visible', Boolean(message));
+}
+
+// テキストエリア内でrangeStartを含む行の先頭が一番上に来るようスクロールする
+function scrollTabJsonToOffset(text, offset) {
+  const lineIndex = (text.slice(0, offset).match(/\n/g) || []).length;
+  const lineHeight = parseFloat(getComputedStyle(tabJsonTextarea).lineHeight) || 18;
+  const target = Math.max(0, lineIndex * lineHeight);
+  tabJsonTextarea.scrollTop = target;
+  // setSelectionRangeによるキャレット追従スクロールが次の描画で上書きすることがあるため再適用する
+  requestAnimationFrame(() => {
+    tabJsonTextarea.scrollTop = target;
+  });
+}
+
+function syncTabJsonView() {
+  tabJsonTextarea.disabled = Boolean(playbackHandle);
+  if (!tabJsonDetails.open) return;
+  if (document.activeElement === tabJsonTextarea) return; // 編集中は上書きしない(カーソル位置を保持)
+
+  const text = formatTabDataJson(tabData);
+  tabJsonTextarea.value = text;
+  setTabJsonError('');
+
+  const ranges = computeNoteJsonRanges(text);
+  if (playingIndex != null && ranges[playingIndex]) {
+    const [start, end] = ranges[playingIndex];
+    tabJsonTextarea.setSelectionRange(start, end);
+    scrollTabJsonToOffset(text, start);
+  } else if (tabSelection) {
+    const from = Math.min(tabSelection.start, tabSelection.end);
+    const to = Math.max(tabSelection.start, tabSelection.end);
+    if (ranges[from] && ranges[to]) {
+      tabJsonTextarea.setSelectionRange(ranges[from][0], ranges[to][1]);
+      scrollTabJsonToOffset(text, ranges[from][0]);
+    }
+  } else {
+    tabJsonTextarea.setSelectionRange(0, 0);
+  }
+}
+
+function applyTabJsonText(rawText) {
+  if (playbackHandle) return;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (e) {
+    setTabJsonError(`JSON構文エラー: ${e.message}`);
+    return;
+  }
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.notes)) {
+    setTabJsonError('notes配列を含むTABデータの形式である必要があります。');
+    return;
+  }
+
+  setTabJsonError('');
+  const maxIndex = parsed.notes.length - 1;
+  if (tabSelection && (tabSelection.start > maxIndex || tabSelection.end > maxIndex)) {
+    tabSelection = null;
+  }
+
+  const nextTabData = {
+    id: tabData.id,
+    title: typeof parsed.title === 'string' ? parsed.title : tabData.title,
+    timeSignature: typeof parsed.timeSignature === 'string' ? parsed.timeSignature : tabData.timeSignature,
+    tempoEvents:
+      Array.isArray(parsed.tempoEvents) && parsed.tempoEvents.length > 0 ? parsed.tempoEvents : tabData.tempoEvents,
+    notes: parsed.notes,
+  };
+  tabHistory = pushHistory(tabHistory, nextTabData);
+  tabData = tabHistory.present;
+  syncTabLibrary();
+  renderTabView();
 }
 
 tabRestBtn.addEventListener('click', () => {
@@ -532,6 +681,7 @@ tabPlayBtn.addEventListener('click', () => {
     onEnd: stopTabPlayback,
   });
   tabPlayBtn.textContent = '停止';
+  syncTabJsonView();
 });
 
 tabExportBtn.addEventListener('click', () => {
@@ -564,6 +714,25 @@ tabImportInput.addEventListener('change', async () => {
   } finally {
     tabImportInput.value = '';
   }
+});
+
+tabJsonDetails.addEventListener('toggle', () => {
+  if (tabJsonDetails.open) syncTabJsonView();
+});
+
+let tabJsonApplyTimer = null;
+
+tabJsonTextarea.addEventListener('input', () => {
+  clearTimeout(tabJsonApplyTimer);
+  const value = tabJsonTextarea.value;
+  tabJsonApplyTimer = setTimeout(() => applyTabJsonText(value), 400);
+});
+
+tabJsonTextarea.addEventListener('change', () => {
+  clearTimeout(tabJsonApplyTimer);
+  // blur(change)はクリック操作のフォーカス移動処理中に同期発火するため、
+  // 直後に発生しうるTAB側のクリック処理(DOM再構築)と競合しないよう次タスクへ遅延させる
+  setTimeout(() => applyTabJsonText(tabJsonTextarea.value), 0);
 });
 
 function debounce(fn, waitMs) {

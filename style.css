@@ -548,3 +548,53 @@ dialog::backdrop {
   font-size: 0.7rem;
   color: var(--color-tab-measure-number);
 }
+
+.tab-json-details {
+  margin-top: 16px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 12px;
+}
+
+.tab-json-details summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.tab-json-hint {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin: 8px 0;
+}
+
+.tab-json-textarea {
+  display: block;
+  width: 100%;
+  min-height: 240px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.8rem;
+  line-height: 18px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.tab-json-textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tab-json-error {
+  min-height: 1.2em;
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: var(--color-root);
+  display: none;
+}
+
+.tab-json-error.visible {
+  display: block;
+}

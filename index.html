@@ -124,6 +124,13 @@
     </div>
 
     <div id="tab-display" class="tab-display" aria-label="TAB譜表示"></div>
+
+    <details id="tab-json-details" class="tab-json-details">
+      <summary>JSON編集</summary>
+      <p class="tab-json-hint">TABデータをJSON形式で直接編集・貼り付けできます。内容は即座にTAB譜へ反映されます(再生中は編集できません)。</p>
+      <textarea id="tab-json-textarea" class="tab-json-textarea" spellcheck="false"></textarea>
+      <div id="tab-json-error" class="tab-json-error" role="alert"></div>
+    </details>
   </section>
 </main>
 
