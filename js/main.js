@@ -24,7 +24,7 @@ import {
   insertEntry,
   insertEntries,
   removeRange,
-  setDurationAt,
+  setDurationRange,
   canTie,
   canHammerPull,
   canSlide,
@@ -247,8 +247,8 @@ function populateDurationButtons() {
       btn.textContent = d.label;
       btn.dataset.duration = d.id;
       btn.addEventListener('click', () => {
-        if (tabSelection && tabSelection.start === tabSelection.end) {
-          commitTab({ notes: setDurationAt(tabData.notes, tabSelection.start, d.id) });
+        if (tabSelection) {
+          commitTab({ notes: setDurationRange(tabData.notes, tabSelection.start, tabSelection.end, d.id) });
         }
         selectedDuration = d.id;
         renderTabView();

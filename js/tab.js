@@ -75,6 +75,12 @@ export function setDurationAt(notes, index, duration) {
   return notes.map((n, i) => (i === index ? { ...n, duration } : n));
 }
 
+// 選択範囲(単一音符の場合も含む)の音符長を一括変更する
+export function setDurationRange(notes, startIndex, endIndex, duration) {
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  return notes.map((n, i) => (i >= from && i <= to ? { ...n, duration } : n));
+}
+
 function canLinkAsNotes(a, b) {
   return Boolean(a) && Boolean(b) && a.type === 'note' && b.type === 'note';
 }
