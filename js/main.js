@@ -295,10 +295,16 @@ function handleFretboardNoteInput(stringIndex, fret) {
   renderTabView();
 }
 
+function isIndexInSelection(index, selection) {
+  const from = Math.min(selection.start, selection.end);
+  const to = Math.max(selection.start, selection.end);
+  return index >= from && index <= to;
+}
+
 function handleTabColumnClick(index, event) {
   if (event.shiftKey && tabSelection) {
     tabSelection = { start: tabSelection.start, end: index };
-  } else if (tabSelection && tabSelection.start === tabSelection.end && tabSelection.start === index) {
+  } else if (tabSelection && isIndexInSelection(index, tabSelection)) {
     tabSelection = null;
   } else {
     tabSelection = { start: index, end: index };
@@ -495,9 +501,13 @@ tabPlayBtn.addEventListener('click', () => {
   }
   if (tabData.notes.length === 0) return;
 
+  // 選択範囲がある場合はその先頭位置から再生する
+  const startIndex = tabSelection ? Math.min(tabSelection.start, tabSelection.end) : 0;
+
   playbackHandle = playTab(tabData, state.tuning, {
     metronome: metronomeOn,
     octaveUp: state.tabOctaveUp,
+    startIndex,
     onNoteStart: (index) => {
       playingIndex = index;
       renderTabView();

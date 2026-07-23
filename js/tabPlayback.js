@@ -128,9 +128,9 @@ export function scheduleClick(time, accent, activeNodes) {
 /**
  * @param {object} tabData
  * @param {{name:string, octave:number}[]} tuning
- * @param {{metronome?: boolean, octaveUp?: boolean, onNoteStart?: (index:number) => void, onEnd?: () => void}} [options]
+ * @param {{metronome?: boolean, octaveUp?: boolean, startIndex?: number, onNoteStart?: (index:number) => void, onEnd?: () => void}} [options]
  */
-export function playTab(tabData, tuning, { metronome = false, octaveUp = false, onNoteStart, onEnd } = {}) {
+export function playTab(tabData, tuning, { metronome = false, octaveUp = false, startIndex = 0, onNoteStart, onEnd } = {}) {
   const ctx = getAudioContext();
   const bpm = tabData.tempoEvents[0]?.bpm || 120;
   const secondsPerBeat = 60 / bpm;
@@ -139,7 +139,10 @@ export function playTab(tabData, tuning, { metronome = false, octaveUp = false, 
 
   const activeNodes = [];
   const timers = [];
-  const groups = groupEntries(tabData.notes);
+  // startIndexより前を除外して再生する。タイ/ハンマリング等の連結途中から始まる場合は
+  // 単独の音符として扱う(直前の音が鳴らないため自然な挙動)
+  const notesToPlay = tabData.notes.slice(startIndex);
+  const groups = groupEntries(notesToPlay);
 
   let t = startTime;
   groups.forEach((group) => {
@@ -160,7 +163,7 @@ export function playTab(tabData, tuning, { metronome = false, octaveUp = false, 
       let subT = groupStart;
       group.items.forEach((item, i) => {
         const delayMs = Math.max(0, (subT - ctx.currentTime) * 1000);
-        const idx = group.startIndex + i;
+        const idx = startIndex + group.startIndex + i;
         timers.push(setTimeout(() => onNoteStart(idx), delayMs));
         subT += DURATION_BEATS[item.duration] * secondsPerBeat;
       });
