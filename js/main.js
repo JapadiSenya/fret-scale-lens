@@ -37,6 +37,7 @@ import {
   pushHistory,
   undoHistory,
   redoHistory,
+  computeMeasures,
 } from './tab.js';
 import { renderTab } from './tabRender.js';
 import { playTab } from './tabPlayback.js';
@@ -405,15 +406,32 @@ function formatFlatObjectLine(obj) {
   return JSON.stringify(obj).replace(/":/g, '": ').replace(/,"/g, ', "');
 }
 
+// notes配列を1音符1行で整形しつつ、TAB表示上の小節の区切りに合わせて空行を挿入する
+function formatNotesArrayLines(notes, timeSignature, suffix) {
+  if (notes.length === 0) return [`  "notes": []${suffix}`];
+
+  const measureEndIndices = new Set(computeMeasures(notes, timeSignature).map((m) => m.endIndex));
+  const lines = ['  "notes": ['];
+  notes.forEach((item, j) => {
+    const isLast = j === notes.length - 1;
+    lines.push(`    ${formatFlatObjectLine(item)}${isLast ? '' : ','}`);
+    if (!isLast && measureEndIndices.has(j)) lines.push('');
+  });
+  lines.push(`  ]${suffix}`);
+  return lines;
+}
+
 // tabDataをJSON整形するが、3階層目(notes/tempoEventsの各要素)のオブジェクトは
-// 1音符・1イベントごとに視認しやすいよう1行にまとめて出力する
+// 1音符・1イベントごとに視認しやすいよう1行にまとめて出力する(notesは小節の区切りに空行を挿入する)
 function formatTabDataJson(data) {
   const keys = Object.keys(data);
   const lines = ['{'];
   keys.forEach((key, i) => {
     const value = data[key];
     const suffix = i === keys.length - 1 ? '' : ',';
-    if (Array.isArray(value) && value.length > 0 && value.every(isFlatObject)) {
+    if (key === 'notes' && Array.isArray(value)) {
+      lines.push(...formatNotesArrayLines(value, data.timeSignature, suffix));
+    } else if (Array.isArray(value) && value.length > 0 && value.every(isFlatObject)) {
       lines.push(`  ${JSON.stringify(key)}: [`);
       value.forEach((item, j) => {
         lines.push(`    ${formatFlatObjectLine(item)}${j === value.length - 1 ? '' : ','}`);
