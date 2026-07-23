@@ -389,10 +389,12 @@ function renderTabView() {
 
 // 再生位置・選択位置・末尾への新規入力に合わせて、TAB表示エリアの横スクロールを追従させる
 function scrollTabIntoView() {
+  const isPlaying = playingIndex != null;
   const focusIndex = playingIndex ?? (tabSelection ? tabSelection.end : tabData.notes.length - 1);
   if (focusIndex == null || focusIndex < 0) return;
   const col = tabDisplay.querySelectorAll('.tab-col')[focusIndex];
-  col?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  // 再生中は先の音符を見越しやすいよう、再生中の音符を表示エリアの中央に寄せる
+  col?.scrollIntoView({ inline: isPlaying ? 'center' : 'nearest', block: 'nearest' });
 }
 
 // --- JSON直接編集 ---
