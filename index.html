@@ -50,6 +50,72 @@
   <div id="legend" class="legend" aria-label="凡例"></div>
 
   <section id="fretboard-container" class="fretboard-container" aria-label="フレットボード"></section>
+
+  <section id="tab-section" class="tab-section" aria-label="TAB譜">
+    <div class="tab-toolbar">
+      <div class="control-group">
+        <label for="tab-title-input">曲名</label>
+        <input type="text" id="tab-title-input">
+      </div>
+
+      <div class="control-group">
+        <label for="tab-tempo-input">テンポ(BPM)</label>
+        <input type="number" id="tab-tempo-input" min="20" max="300">
+      </div>
+
+      <div class="control-group">
+        <label>音符長</label>
+        <div id="duration-buttons" class="button-group"></div>
+      </div>
+
+      <div class="control-group">
+        <label>入力</label>
+        <div class="button-group">
+          <button id="tab-rest-btn" type="button">休符</button>
+          <button id="tab-ghost-btn" type="button" aria-pressed="false">ゴースト</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label>アーティキュレーション</label>
+        <div class="button-group">
+          <button id="tab-tie-btn" type="button">タイ</button>
+          <button id="tab-hammer-pull-btn" type="button">H/P</button>
+          <button id="tab-slide-btn" type="button">スライド</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label>編集</label>
+        <div class="button-group">
+          <button id="tab-delete-btn" type="button">削除</button>
+          <button id="tab-undo-btn" type="button">元に戻す</button>
+          <button id="tab-redo-btn" type="button">やり直す</button>
+          <button id="tab-copy-btn" type="button">コピー</button>
+          <button id="tab-paste-btn" type="button">貼り付け</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label>再生</label>
+        <div class="button-group">
+          <button id="tab-play-btn" type="button">再生</button>
+          <button id="tab-metronome-btn" type="button" aria-pressed="false">メトロノーム</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label>ファイル</label>
+        <div class="button-group">
+          <button id="tab-export-btn" type="button">Export</button>
+          <button id="tab-import-btn" type="button">Import</button>
+          <input type="file" id="tab-import-input" accept="application/json" hidden>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-display" class="tab-display" aria-label="TAB譜表示"></div>
+  </section>
 </main>
 
 <dialog id="tuning-dialog">
