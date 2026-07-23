@@ -13,7 +13,7 @@ import {
   MAX_STRINGS,
 } from './tuning.js';
 import { loadSettings, saveSettings } from './storage.js';
-import { playFrequency } from './audio.js';
+import { playFrequency, setMasterVolume } from './audio.js';
 import { renderFretboard } from './render.js';
 
 const OCTAVE_OPTIONS = [0, 1, 2, 3, 4, 5, 6];
@@ -32,6 +32,7 @@ const addStringBtn = document.getElementById('add-string-btn');
 const fretboardContainer = document.getElementById('fretboard-container');
 const displayModeToggle = document.getElementById('display-mode-toggle');
 const legendEl = document.getElementById('legend');
+const masterVolumeInput = document.getElementById('master-volume');
 
 const DISPLAY_MODE_LABELS = {
   scale: 'スケール構成音',
@@ -59,6 +60,7 @@ function syncControlsFromState() {
   const matchedPreset = TUNING_PRESETS.find((p) => sameTuning(p.strings, state.tuning));
   presetSelect.value = matchedPreset ? matchedPreset.id : CUSTOM_PRESET_VALUE;
   syncDisplayModeToggle();
+  masterVolumeInput.value = String(state.masterVolume);
 }
 
 function syncDisplayModeToggle() {
@@ -69,6 +71,10 @@ function syncDisplayModeToggle() {
 function persistAndRender() {
   saveSettings(state);
   render();
+}
+
+function persist() {
+  saveSettings(state);
 }
 
 function render() {
@@ -171,6 +177,7 @@ function debounce(fn, waitMs) {
 populateStaticSelects();
 syncControlsFromState();
 renderStringList();
+setMasterVolume(state.masterVolume);
 render();
 
 keySelect.addEventListener('change', () => {
@@ -212,6 +219,12 @@ displayModeToggle.addEventListener('click', () => {
   state.displayMode = state.displayMode === 'function' ? 'scale' : 'function';
   syncDisplayModeToggle();
   persistAndRender();
+});
+
+masterVolumeInput.addEventListener('input', () => {
+  state.masterVolume = Number(masterVolumeInput.value);
+  setMasterVolume(state.masterVolume);
+  persist();
 });
 
 window.addEventListener('resize', debounce(render, 150));

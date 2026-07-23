@@ -11,6 +11,7 @@ export function defaultSettings() {
     key: 'C',
     scale: 'major',
     displayMode: 'scale',
+    masterVolume: 0.8,
   };
 }
 
