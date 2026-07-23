@@ -450,6 +450,53 @@ dialog::backdrop {
   font-weight: 600;
 }
 
+.tab-cell-note.tab-color-root {
+  background: var(--color-root);
+  color: var(--color-root-text);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.tab-cell-note.tab-color-in-scale {
+  background: var(--color-in-scale);
+  color: var(--color-in-scale-text);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.tab-cell-note.tab-color-function-t {
+  background: var(--color-function-t);
+  color: var(--color-function-text);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.tab-cell-note.tab-color-function-s {
+  background: var(--color-function-s);
+  color: var(--color-function-text);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.tab-cell-note.tab-color-function-d {
+  background: var(--color-function-d);
+  color: var(--color-function-text);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.tab-cell-note.tab-color-function-neutral {
+  background: var(--color-function-neutral);
+  color: var(--color-function-text);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.tab-cell-note.tab-color-root-accent {
+  outline: 2px solid var(--color-root-accent-border);
+  outline-offset: 1px;
+}
+
 .tab-cell-ghost {
   color: var(--color-tab-ghost);
   font-weight: 600;

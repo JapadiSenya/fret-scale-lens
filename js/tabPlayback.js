@@ -32,11 +32,12 @@ function scheduleEnvelope(gain, startTime, duration, peak = VOICE_PEAK_GAIN) {
   return releaseEnd;
 }
 
-function frequencyForEntry(tuning, entry) {
+function frequencyForEntry(tuning, entry, octaveUp) {
   const openString = tuning[entry.string];
   if (!openString) return null;
   const note = noteAtFret(openString.name, openString.octave, entry.fret);
-  return frequencyOf(note.name, note.octave);
+  const freq = frequencyOf(note.name, note.octave);
+  return octaveUp ? freq * 2 : freq;
 }
 
 // タイ/ハンマリング/プリング/スライドで連結された連続音符を1つの発音グループにまとめる
@@ -56,7 +57,7 @@ function groupEntries(notes) {
   return groups;
 }
 
-function scheduleVoice(ctx, tuning, group, groupStart, secondsPerBeat, activeNodes) {
+function scheduleVoice(ctx, tuning, group, groupStart, secondsPerBeat, activeNodes, octaveUp) {
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = 'triangle';
@@ -65,14 +66,14 @@ function scheduleVoice(ctx, tuning, group, groupStart, secondsPerBeat, activeNod
   let totalDuration = 0;
   group.items.forEach((item, i) => {
     const dur = DURATION_BEATS[item.duration] * secondsPerBeat;
-    const freq = frequencyForEntry(tuning, item);
+    const freq = frequencyForEntry(tuning, item, octaveUp);
     const prevItem = group.items[i - 1];
     if (!prevItem || prevItem.articulation !== 'slide') {
       osc.frequency.setValueAtTime(freq, t);
     }
     const nextItem = group.items[i + 1];
     if (item.articulation === 'slide' && nextItem) {
-      const nextFreq = frequencyForEntry(tuning, nextItem);
+      const nextFreq = frequencyForEntry(tuning, nextItem, octaveUp);
       osc.frequency.linearRampToValueAtTime(nextFreq, t + dur);
     }
     t += dur;
@@ -88,8 +89,8 @@ function scheduleVoice(ctx, tuning, group, groupStart, secondsPerBeat, activeNod
   activeNodes.push({ osc, gain });
 }
 
-function scheduleGhost(ctx, tuning, entry, startTime, activeNodes) {
-  const freq = frequencyForEntry(tuning, entry);
+function scheduleGhost(ctx, tuning, entry, startTime, activeNodes, octaveUp) {
+  const freq = frequencyForEntry(tuning, entry, octaveUp);
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = 'triangle';
@@ -127,9 +128,9 @@ export function scheduleClick(time, accent, activeNodes) {
 /**
  * @param {object} tabData
  * @param {{name:string, octave:number}[]} tuning
- * @param {{metronome?: boolean, onNoteStart?: (index:number) => void, onEnd?: () => void}} [options]
+ * @param {{metronome?: boolean, octaveUp?: boolean, onNoteStart?: (index:number) => void, onEnd?: () => void}} [options]
  */
-export function playTab(tabData, tuning, { metronome = false, onNoteStart, onEnd } = {}) {
+export function playTab(tabData, tuning, { metronome = false, octaveUp = false, onNoteStart, onEnd } = {}) {
   const ctx = getAudioContext();
   const bpm = tabData.tempoEvents[0]?.bpm || 120;
   const secondsPerBeat = 60 / bpm;
@@ -150,9 +151,9 @@ export function playTab(tabData, tuning, { metronome = false, onNoteStart, onEnd
     const first = group.items[0];
 
     if (first.type === 'note') {
-      scheduleVoice(ctx, tuning, group, groupStart, secondsPerBeat, activeNodes);
+      scheduleVoice(ctx, tuning, group, groupStart, secondsPerBeat, activeNodes, octaveUp);
     } else if (first.type === 'ghost') {
-      scheduleGhost(ctx, tuning, first, groupStart, activeNodes);
+      scheduleGhost(ctx, tuning, first, groupStart, activeNodes, octaveUp);
     }
 
     if (onNoteStart) {

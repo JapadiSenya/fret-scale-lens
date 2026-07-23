@@ -1,6 +1,8 @@
 // TAB譜表示エリアのDOM描画
 
 import { computeMeasureBreaks } from './tab.js';
+import { NOTE_NAMES, noteAtFret } from './notes.js';
+import { isRootNote, isInScale, getDegreeInfo } from './scales.js';
 
 const ARTICULATION_SUFFIX = {
   tie: '~',
@@ -33,12 +35,38 @@ function inRange(index, selection) {
   return index >= from && index <= to;
 }
 
+// フレットボード側(render.js)と同じ配色ルールをTAB譜の数字にも適用する
+function colorClassesForEntry(entry, tuning, colorSync, key, scale, displayMode) {
+  if (!colorSync || entry.type !== 'note') return [];
+  const openString = tuning[entry.string];
+  if (!openString) return [];
+  const note = noteAtFret(openString.name, openString.octave, entry.fret);
+  const noteIndex = NOTE_NAMES.indexOf(note.name);
+  const rootIndex = NOTE_NAMES.indexOf(key);
+  const root = isRootNote(noteIndex, rootIndex);
+
+  if (displayMode === 'function') {
+    const degreeInfo = getDegreeInfo(noteIndex, rootIndex, scale);
+    if (!degreeInfo) return [];
+    const funcClass = degreeInfo.func ? `tab-color-function-${degreeInfo.func.toLowerCase()}` : 'tab-color-function-neutral';
+    return root ? [funcClass, 'tab-color-root-accent'] : [funcClass];
+  }
+
+  if (root) return ['tab-color-root'];
+  if (isInScale(noteIndex, rootIndex, scale)) return ['tab-color-in-scale'];
+  return [];
+}
+
 /**
  * @param {HTMLElement} container
- * @param {{tabData: object, tuning: {name:string, octave:number}[], selection: {start:number, end:number}|null, playingIndex: number|null}} view
+ * @param {{tabData: object, tuning: {name:string, octave:number}[], selection: {start:number, end:number}|null, playingIndex: number|null, key: string, scale: string, displayMode: 'scale'|'function', colorSync: boolean}} view
  * @param {{onColumnClick?: (index:number, event:MouseEvent) => void}} [callbacks]
  */
-export function renderTab(container, { tabData, tuning, selection, playingIndex }, { onColumnClick } = {}) {
+export function renderTab(
+  container,
+  { tabData, tuning, selection, playingIndex, key, scale, displayMode, colorSync },
+  { onColumnClick } = {}
+) {
   const displayStrings = [...tuning].reverse();
   const stringCount = displayStrings.length;
   const notes = tabData.notes;
@@ -100,6 +128,9 @@ export function renderTab(container, { tabData, tuning, selection, playingIndex 
             const suffix = entry.articulation ? ARTICULATION_SUFFIX[entry.articulation] || '' : '';
             cell.textContent = `${entry.fret}${suffix}`;
             cell.classList.add('tab-cell-note');
+            colorClassesForEntry(entry, tuning, colorSync, key, scale, displayMode).forEach((c) =>
+              cell.classList.add(c)
+            );
           }
         } else {
           cell.textContent = '－';

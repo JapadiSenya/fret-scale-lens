@@ -73,6 +73,8 @@ const tabCopyBtn = document.getElementById('tab-copy-btn');
 const tabPasteBtn = document.getElementById('tab-paste-btn');
 const tabPlayBtn = document.getElementById('tab-play-btn');
 const tabMetronomeBtn = document.getElementById('tab-metronome-btn');
+const tabOctaveUpBtn = document.getElementById('tab-octave-up-btn');
+const tabColorSyncBtn = document.getElementById('tab-color-sync-btn');
 const tabExportBtn = document.getElementById('tab-export-btn');
 const tabImportBtn = document.getElementById('tab-import-btn');
 const tabImportInput = document.getElementById('tab-import-input');
@@ -116,6 +118,18 @@ function syncControlsFromState() {
   presetSelect.value = matchedPreset ? matchedPreset.id : CUSTOM_PRESET_VALUE;
   syncDisplayModeToggle();
   masterVolumeInput.value = String(state.masterVolume);
+  syncTabOctaveUpButton();
+  syncTabColorSyncButton();
+}
+
+function syncTabOctaveUpButton() {
+  tabOctaveUpBtn.classList.toggle('active', state.tabOctaveUp);
+  tabOctaveUpBtn.setAttribute('aria-pressed', String(state.tabOctaveUp));
+}
+
+function syncTabColorSyncButton() {
+  tabColorSyncBtn.classList.toggle('active', state.tabColorSync);
+  tabColorSyncBtn.setAttribute('aria-pressed', String(state.tabColorSync));
 }
 
 function syncDisplayModeToggle() {
@@ -338,7 +352,16 @@ function renderTabView() {
   tabTempoInput.value = tabData.tempoEvents[0]?.bpm ?? 120;
   renderTab(
     tabDisplay,
-    { tabData, tuning: state.tuning, selection: tabSelection, playingIndex },
+    {
+      tabData,
+      tuning: state.tuning,
+      selection: tabSelection,
+      playingIndex,
+      key: state.key,
+      scale: state.scale,
+      displayMode: state.displayMode,
+      colorSync: state.tabColorSync,
+    },
     { onColumnClick: handleTabColumnClick }
   );
   syncTabButtons();
@@ -443,6 +466,19 @@ tabMetronomeBtn.addEventListener('click', () => {
   tabMetronomeBtn.setAttribute('aria-pressed', String(metronomeOn));
 });
 
+tabOctaveUpBtn.addEventListener('click', () => {
+  state.tabOctaveUp = !state.tabOctaveUp;
+  syncTabOctaveUpButton();
+  persist();
+});
+
+tabColorSyncBtn.addEventListener('click', () => {
+  state.tabColorSync = !state.tabColorSync;
+  syncTabColorSyncButton();
+  persist();
+  renderTabView();
+});
+
 tabPlayBtn.addEventListener('click', () => {
   if (playbackHandle) {
     stopTabPlayback();
@@ -452,6 +488,7 @@ tabPlayBtn.addEventListener('click', () => {
 
   playbackHandle = playTab(tabData, state.tuning, {
     metronome: metronomeOn,
+    octaveUp: state.tabOctaveUp,
     onNoteStart: (index) => {
       playingIndex = index;
       renderTabView();

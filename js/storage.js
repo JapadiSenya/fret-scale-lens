@@ -14,6 +14,8 @@ export function defaultSettings() {
     scale: 'major',
     displayMode: 'scale',
     masterVolume: 0.8,
+    tabOctaveUp: false,
+    tabColorSync: false,
   };
 }
 
