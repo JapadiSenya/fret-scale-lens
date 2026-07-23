@@ -6,6 +6,32 @@ import { DURATION_BEATS, parseTimeSignature } from './tab.js';
 
 const LOOKAHEAD_PAD = 0.05;
 
+const ATTACK_SECONDS = 0.01;
+const INITIAL_DECAY_SECONDS = 0.08;
+const RELEASE_SECONDS = 0.12;
+const VOICE_PEAK_GAIN = 0.4;
+const VOICE_SUSTAIN_RATIO = 0.45;
+
+// 音符長いっぱいまで音量を保持し、末尾だけ短くリリースするエンベロープ(アタック→減衰→サステイン→リリース)を組む
+function scheduleEnvelope(gain, startTime, duration, peak = VOICE_PEAK_GAIN) {
+  const sustainLevel = Math.max(peak * VOICE_SUSTAIN_RATIO, 0.0001);
+  const attackEnd = startTime + Math.min(ATTACK_SECONDS, duration);
+  const decayEnd = Math.min(attackEnd + INITIAL_DECAY_SECONDS, startTime + duration);
+  const noteEnd = startTime + duration;
+  const releaseStart = Math.max(decayEnd, noteEnd - RELEASE_SECONDS);
+  const releaseEnd = Math.max(noteEnd, releaseStart + 0.01);
+
+  gain.gain.setValueAtTime(0, startTime);
+  gain.gain.linearRampToValueAtTime(peak, attackEnd);
+  gain.gain.exponentialRampToValueAtTime(sustainLevel, decayEnd);
+  if (releaseStart > decayEnd) {
+    gain.gain.setValueAtTime(sustainLevel, releaseStart);
+  }
+  gain.gain.exponentialRampToValueAtTime(0.0001, releaseEnd);
+
+  return releaseEnd;
+}
+
 function frequencyForEntry(tuning, entry) {
   const openString = tuning[entry.string];
   if (!openString) return null;
@@ -53,15 +79,12 @@ function scheduleVoice(ctx, tuning, group, groupStart, secondsPerBeat, activeNod
     totalDuration += dur;
   });
 
-  const peak = 0.35;
-  gain.gain.setValueAtTime(0, groupStart);
-  gain.gain.linearRampToValueAtTime(peak, groupStart + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.0001, groupStart + Math.max(totalDuration, 0.15));
+  const releaseEnd = scheduleEnvelope(gain, groupStart, totalDuration);
 
   osc.connect(gain);
   gain.connect(getMasterGain());
   osc.start(groupStart);
-  osc.stop(groupStart + totalDuration + 0.05);
+  osc.stop(releaseEnd + 0.02);
   activeNodes.push({ osc, gain });
 }
 

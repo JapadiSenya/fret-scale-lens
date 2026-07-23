@@ -381,8 +381,17 @@ tabSlideBtn.addEventListener('click', () => {
 
 tabDeleteBtn.addEventListener('click', () => {
   if (!tabSelection) return;
-  commitTab({ notes: removeRange(tabData.notes, tabSelection.start, tabSelection.end) });
-  tabSelection = null;
+  const deletedAt = Math.min(tabSelection.start, tabSelection.end);
+  const newNotes = removeRange(tabData.notes, tabSelection.start, tabSelection.end);
+  commitTab({ notes: newNotes });
+
+  if (newNotes.length === 0) {
+    tabSelection = null;
+  } else {
+    // 削除位置の音符(繰り上がってきたもの)を選択。末尾を削除した場合は新しい末尾を選択する
+    const nextIndex = Math.min(deletedAt, newNotes.length - 1);
+    tabSelection = { start: nextIndex, end: nextIndex };
+  }
   renderTabView();
 });
 
