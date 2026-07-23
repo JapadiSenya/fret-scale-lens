@@ -402,6 +402,10 @@ dialog::backdrop {
   color: var(--color-text-muted);
 }
 
+.tab-string-label-spacer {
+  height: 28px;
+}
+
 .tab-scroll-area {
   display: flex;
   align-items: stretch;

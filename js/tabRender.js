@@ -77,6 +77,12 @@ export function renderTab(
 
   const labelCol = document.createElement('div');
   labelCol.className = 'tab-string-labels';
+
+  // 各tab-colの1行目は音符長シンボル用の行なので、ラベル列にも同じ高さの空行を入れて行を揃える
+  const labelSpacer = document.createElement('div');
+  labelSpacer.className = 'tab-string-label-spacer';
+  labelCol.appendChild(labelSpacer);
+
   displayStrings.forEach((s) => {
     const label = document.createElement('div');
     label.className = 'tab-string-label';
