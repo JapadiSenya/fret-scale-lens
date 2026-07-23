@@ -365,6 +365,15 @@ function renderTabView() {
     { onColumnClick: handleTabColumnClick }
   );
   syncTabButtons();
+  scrollTabIntoView();
+}
+
+// 再生位置・選択位置・末尾への新規入力に合わせて、TAB表示エリアの横スクロールを追従させる
+function scrollTabIntoView() {
+  const focusIndex = playingIndex ?? (tabSelection ? tabSelection.end : tabData.notes.length - 1);
+  if (focusIndex == null || focusIndex < 0) return;
+  const col = tabDisplay.querySelectorAll('.tab-col')[focusIndex];
+  col?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
 }
 
 tabRestBtn.addEventListener('click', () => {
