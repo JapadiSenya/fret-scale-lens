@@ -2,7 +2,7 @@
 
 import { noteAtFret, frequencyOf } from './notes.js';
 import { getAudioContext, getMasterGain } from './audio.js';
-import { DURATION_BEATS, parseTimeSignature } from './tab.js';
+import { getEntryBeats, parseTimeSignature } from './tab.js';
 
 const LOOKAHEAD_PAD = 0.05;
 
@@ -65,7 +65,7 @@ function scheduleVoice(ctx, tuning, group, groupStart, secondsPerBeat, activeNod
   let t = groupStart;
   let totalDuration = 0;
   group.items.forEach((item, i) => {
-    const dur = DURATION_BEATS[item.duration] * secondsPerBeat;
+    const dur = getEntryBeats(item) * secondsPerBeat;
     const freq = frequencyForEntry(tuning, item, octaveUp);
     const prevItem = group.items[i - 1];
     if (!prevItem || prevItem.articulation !== 'slide') {
@@ -148,7 +148,7 @@ export function playTab(tabData, tuning, { metronome = false, octaveUp = false, 
   groups.forEach((group) => {
     const groupStart = t;
     const totalDuration = group.items.reduce(
-      (sum, item) => sum + DURATION_BEATS[item.duration] * secondsPerBeat,
+      (sum, item) => sum + getEntryBeats(item) * secondsPerBeat,
       0
     );
     const first = group.items[0];
@@ -165,7 +165,7 @@ export function playTab(tabData, tuning, { metronome = false, octaveUp = false, 
         const delayMs = Math.max(0, (subT - ctx.currentTime) * 1000);
         const idx = startIndex + group.startIndex + i;
         timers.push(setTimeout(() => onNoteStart(idx), delayMs));
-        subT += DURATION_BEATS[item.duration] * secondsPerBeat;
+        subT += getEntryBeats(item) * secondsPerBeat;
       });
     }
 

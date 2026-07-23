@@ -39,16 +39,22 @@ export function createTabLibrary() {
   return { tabs: [createTabData()] };
 }
 
-export function createNoteEntry({ string, fret, duration }) {
-  return { type: 'note', string, fret, duration, articulation: null };
+export function createNoteEntry({ string, fret, duration, dotted = false }) {
+  return { type: 'note', string, fret, duration, dotted, articulation: null };
 }
 
-export function createRestEntry(duration) {
-  return { type: 'rest', duration, articulation: null };
+export function createRestEntry(duration, dotted = false) {
+  return { type: 'rest', duration, dotted, articulation: null };
 }
 
-export function createGhostEntry({ string, fret, duration }) {
-  return { type: 'ghost', string, fret, duration, articulation: null };
+export function createGhostEntry({ string, fret, duration, dotted = false }) {
+  return { type: 'ghost', string, fret, duration, dotted, articulation: null };
+}
+
+// 付点を考慮した実際の拍数
+export function getEntryBeats(entry) {
+  const base = DURATION_BEATS[entry.duration] ?? 1;
+  return entry.dotted ? base * 1.5 : base;
 }
 
 // notes配列のafterIndexの直後にentryを挿入する(afterIndexが-1なら先頭、undefinedなら末尾)
@@ -79,6 +85,12 @@ export function setDurationAt(notes, index, duration) {
 export function setDurationRange(notes, startIndex, endIndex, duration) {
   const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
   return notes.map((n, i) => (i >= from && i <= to ? { ...n, duration } : n));
+}
+
+// 選択範囲(単一音符の場合も含む)の付点有無を一括変更する
+export function setDottedRange(notes, startIndex, endIndex, dotted) {
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  return notes.map((n, i) => (i >= from && i <= to ? { ...n, dotted } : n));
 }
 
 function canLinkAsNotes(a, b) {
@@ -136,19 +148,27 @@ export function parseTimeSignature(sig) {
   };
 }
 
-// 各notesインデックスの直前に小節線を描くべきかどうかを判定するためのSet(インデックス集合)を返す
-export function computeMeasureBreaks(notes, timeSignature) {
+// notes配列を小節ごとにグルーピングし、小節番号・拍数合計・timeSignatureとの整合性を計算する
+export function computeMeasures(notes, timeSignature) {
   const { beatsPerMeasure } = parseTimeSignature(timeSignature);
-  const breaks = new Set();
-  let beatsInMeasure = 0;
+  if (notes.length === 0) return [];
+
+  const measures = [];
+  let current = { startIndex: 0, totalBeats: 0 };
   notes.forEach((note, i) => {
-    if (i > 0 && beatsInMeasure >= beatsPerMeasure) {
-      breaks.add(i);
-      beatsInMeasure = 0;
+    if (i > 0 && current.totalBeats >= beatsPerMeasure) {
+      measures.push({ ...current, endIndex: i - 1 });
+      current = { startIndex: i, totalBeats: 0 };
     }
-    beatsInMeasure += DURATION_BEATS[note.duration] ?? 1;
+    current.totalBeats += getEntryBeats(note);
   });
-  return breaks;
+  measures.push({ ...current, endIndex: notes.length - 1 });
+
+  return measures.map((m, i) => ({
+    ...m,
+    measureNumber: i + 1,
+    valid: Math.abs(m.totalBeats - beatsPerMeasure) < 1e-9,
+  }));
 }
 
 // --- Undo/Redo履歴(スナップショット方式) ---

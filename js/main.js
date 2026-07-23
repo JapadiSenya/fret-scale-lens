@@ -25,6 +25,7 @@ import {
   insertEntries,
   removeRange,
   setDurationRange,
+  setDottedRange,
   canTie,
   canHammerPull,
   canSlide,
@@ -62,6 +63,7 @@ const tabTitleInput = document.getElementById('tab-title-input');
 const tabTempoInput = document.getElementById('tab-tempo-input');
 const durationButtonsEl = document.getElementById('duration-buttons');
 const tabRestBtn = document.getElementById('tab-rest-btn');
+const tabDottedBtn = document.getElementById('tab-dotted-btn');
 const tabGhostBtn = document.getElementById('tab-ghost-btn');
 const tabTieBtn = document.getElementById('tab-tie-btn');
 const tabHammerPullBtn = document.getElementById('tab-hammer-pull-btn');
@@ -86,6 +88,7 @@ let tabHistory = createHistory(tabData);
 let tabSelection = null; // {start, end} (notesへのインデックス範囲、順不同)
 let tabClipboard = null;
 let selectedDuration = 'quarter';
+let dottedInput = false;
 let pendingInputMode = 'note'; // 'note' | 'ghost'
 let metronomeOn = false;
 let playbackHandle = null;
@@ -264,6 +267,11 @@ function syncGhostButton() {
   tabGhostBtn.setAttribute('aria-pressed', String(active));
 }
 
+function syncDottedButton() {
+  tabDottedBtn.classList.toggle('active', dottedInput);
+  tabDottedBtn.setAttribute('aria-pressed', String(dottedInput));
+}
+
 function syncTabLibrary() {
   tabLibrary = { ...tabLibrary, tabs: [tabData] };
   saveTabLibrary(tabLibrary);
@@ -280,8 +288,8 @@ function commitTab(partialChanges) {
 function handleFretboardNoteInput(stringIndex, fret) {
   const isGhost = pendingInputMode === 'ghost';
   const entry = isGhost
-    ? createGhostEntry({ string: stringIndex, fret, duration: selectedDuration })
-    : createNoteEntry({ string: stringIndex, fret, duration: selectedDuration });
+    ? createGhostEntry({ string: stringIndex, fret, duration: selectedDuration, dotted: dottedInput })
+    : createNoteEntry({ string: stringIndex, fret, duration: selectedDuration, dotted: dottedInput });
 
   const singleSelected =
     tabSelection && tabSelection.start === tabSelection.end ? tabSelection.start : undefined;
@@ -383,7 +391,7 @@ function scrollTabIntoView() {
 }
 
 tabRestBtn.addEventListener('click', () => {
-  const entry = createRestEntry(selectedDuration);
+  const entry = createRestEntry(selectedDuration, dottedInput);
   const singleSelected =
     tabSelection && tabSelection.start === tabSelection.end ? tabSelection.start : undefined;
   commitTab({ notes: insertEntry(tabData.notes, entry, singleSelected) });
@@ -394,6 +402,15 @@ tabRestBtn.addEventListener('click', () => {
 tabGhostBtn.addEventListener('click', () => {
   pendingInputMode = pendingInputMode === 'ghost' ? 'note' : 'ghost';
   syncGhostButton();
+});
+
+tabDottedBtn.addEventListener('click', () => {
+  dottedInput = !dottedInput;
+  if (tabSelection) {
+    commitTab({ notes: setDottedRange(tabData.notes, tabSelection.start, tabSelection.end, dottedInput) });
+  }
+  syncDottedButton();
+  renderTabView();
 });
 
 tabTieBtn.addEventListener('click', () => {
@@ -562,6 +579,7 @@ syncControlsFromState();
 renderStringList();
 populateDurationButtons();
 syncGhostButton();
+syncDottedButton();
 setMasterVolume(state.masterVolume);
 render();
 

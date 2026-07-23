@@ -1,6 +1,6 @@
 // TAB譜表示エリアのDOM描画
 
-import { computeMeasureBreaks } from './tab.js';
+import { computeMeasures } from './tab.js';
 import { NOTE_NAMES, noteAtFret } from './notes.js';
 import { isRootNote, isInScale, getDegreeInfo } from './scales.js';
 
@@ -70,7 +70,7 @@ export function renderTab(
   const displayStrings = [...tuning].reverse();
   const stringCount = displayStrings.length;
   const notes = tabData.notes;
-  const breaks = computeMeasureBreaks(notes, tabData.timeSignature);
+  const measures = computeMeasures(notes, tabData.timeSignature);
 
   const wrapper = document.createElement('div');
   wrapper.className = 'tab-grid';
@@ -94,24 +94,18 @@ export function renderTab(
   const scrollArea = document.createElement('div');
   scrollArea.className = 'tab-scroll-area';
 
-  notes.forEach((entry, index) => {
-    if (breaks.has(index)) {
-      const barLine = document.createElement('div');
-      barLine.className = 'tab-bar-line';
-      scrollArea.appendChild(barLine);
-    }
-
+  function buildColumn(entry, index) {
     const col = document.createElement('div');
     col.className = 'tab-col';
     if (inRange(index, selection)) col.classList.add('selected');
     if (playingIndex === index) col.classList.add('playing');
-    col.title = DURATION_JA[entry.duration] || '';
+    col.title = (DURATION_JA[entry.duration] || '') + (entry.dotted ? '(付点)' : '');
     col.tabIndex = 0;
     col.setAttribute('role', 'button');
 
     const durationRow = document.createElement('div');
     durationRow.className = 'tab-duration-symbol';
-    durationRow.textContent = DURATION_SYMBOL[entry.duration] || '';
+    durationRow.textContent = (DURATION_SYMBOL[entry.duration] || '') + (entry.dotted ? '.' : '');
     col.appendChild(durationRow);
 
     if (entry.type === 'rest') {
@@ -154,7 +148,24 @@ export function renderTab(
       }
     });
 
-    scrollArea.appendChild(col);
+    return col;
+  }
+
+  measures.forEach((measure) => {
+    const measureEl = document.createElement('div');
+    measureEl.className = 'tab-measure';
+    if (!measure.valid) measureEl.classList.add('invalid');
+
+    const numberLabel = document.createElement('div');
+    numberLabel.className = 'tab-measure-number';
+    numberLabel.textContent = String(measure.measureNumber);
+    measureEl.appendChild(numberLabel);
+
+    for (let index = measure.startIndex; index <= measure.endIndex; index++) {
+      measureEl.appendChild(buildColumn(notes[index], index));
+    }
+
+    scrollArea.appendChild(measureEl);
   });
 
   wrapper.appendChild(scrollArea);
