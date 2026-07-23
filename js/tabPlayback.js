@@ -1,0 +1,179 @@
+// TAB譜の再生(tempoEvents・durationから実時間へ変換して順次再生)とメトロノーム
+
+import { noteAtFret, frequencyOf } from './notes.js';
+import { getAudioContext, getMasterGain } from './audio.js';
+import { DURATION_BEATS, parseTimeSignature } from './tab.js';
+
+const LOOKAHEAD_PAD = 0.05;
+
+function frequencyForEntry(tuning, entry) {
+  const openString = tuning[entry.string];
+  if (!openString) return null;
+  const note = noteAtFret(openString.name, openString.octave, entry.fret);
+  return frequencyOf(note.name, note.octave);
+}
+
+// タイ/ハンマリング/プリング/スライドで連結された連続音符を1つの発音グループにまとめる
+function groupEntries(notes) {
+  const groups = [];
+  notes.forEach((entry, i) => {
+    const prev = notes[i - 1];
+    const linkedToPrev =
+      prev && prev.type === 'note' && entry.type === 'note' &&
+      ['tie', 'hammerOn', 'pullOff', 'slide'].includes(prev.articulation || '');
+    if (linkedToPrev) {
+      groups[groups.length - 1].items.push(entry);
+    } else {
+      groups.push({ startIndex: i, items: [entry] });
+    }
+  });
+  return groups;
+}
+
+function scheduleVoice(ctx, tuning, group, groupStart, secondsPerBeat, activeNodes) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'triangle';
+
+  let t = groupStart;
+  let totalDuration = 0;
+  group.items.forEach((item, i) => {
+    const dur = DURATION_BEATS[item.duration] * secondsPerBeat;
+    const freq = frequencyForEntry(tuning, item);
+    const prevItem = group.items[i - 1];
+    if (!prevItem || prevItem.articulation !== 'slide') {
+      osc.frequency.setValueAtTime(freq, t);
+    }
+    const nextItem = group.items[i + 1];
+    if (item.articulation === 'slide' && nextItem) {
+      const nextFreq = frequencyForEntry(tuning, nextItem);
+      osc.frequency.linearRampToValueAtTime(nextFreq, t + dur);
+    }
+    t += dur;
+    totalDuration += dur;
+  });
+
+  const peak = 0.35;
+  gain.gain.setValueAtTime(0, groupStart);
+  gain.gain.linearRampToValueAtTime(peak, groupStart + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, groupStart + Math.max(totalDuration, 0.15));
+
+  osc.connect(gain);
+  gain.connect(getMasterGain());
+  osc.start(groupStart);
+  osc.stop(groupStart + totalDuration + 0.05);
+  activeNodes.push({ osc, gain });
+}
+
+function scheduleGhost(ctx, tuning, entry, startTime, activeNodes) {
+  const freq = frequencyForEntry(tuning, entry);
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(freq, startTime);
+
+  gain.gain.setValueAtTime(0, startTime);
+  gain.gain.linearRampToValueAtTime(0.15, startTime + 0.005);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.12);
+
+  osc.connect(gain);
+  gain.connect(getMasterGain());
+  osc.start(startTime);
+  osc.stop(startTime + 0.15);
+  activeNodes.push({ osc, gain });
+}
+
+export function scheduleClick(time, accent, activeNodes) {
+  const ctx = getAudioContext();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(accent ? 1500 : 1000, time);
+
+  gain.gain.setValueAtTime(0.0001, time);
+  gain.gain.linearRampToValueAtTime(accent ? 0.25 : 0.15, time + 0.004);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.06);
+
+  osc.connect(gain);
+  gain.connect(getMasterGain());
+  osc.start(time);
+  osc.stop(time + 0.08);
+  activeNodes?.push({ osc, gain });
+}
+
+/**
+ * @param {object} tabData
+ * @param {{name:string, octave:number}[]} tuning
+ * @param {{metronome?: boolean, onNoteStart?: (index:number) => void, onEnd?: () => void}} [options]
+ */
+export function playTab(tabData, tuning, { metronome = false, onNoteStart, onEnd } = {}) {
+  const ctx = getAudioContext();
+  const bpm = tabData.tempoEvents[0]?.bpm || 120;
+  const secondsPerBeat = 60 / bpm;
+  const { beatsPerMeasure } = parseTimeSignature(tabData.timeSignature);
+  const startTime = ctx.currentTime + LOOKAHEAD_PAD;
+
+  const activeNodes = [];
+  const timers = [];
+  const groups = groupEntries(tabData.notes);
+
+  let t = startTime;
+  groups.forEach((group) => {
+    const groupStart = t;
+    const totalDuration = group.items.reduce(
+      (sum, item) => sum + DURATION_BEATS[item.duration] * secondsPerBeat,
+      0
+    );
+    const first = group.items[0];
+
+    if (first.type === 'note') {
+      scheduleVoice(ctx, tuning, group, groupStart, secondsPerBeat, activeNodes);
+    } else if (first.type === 'ghost') {
+      scheduleGhost(ctx, tuning, first, groupStart, activeNodes);
+    }
+
+    if (onNoteStart) {
+      let subT = groupStart;
+      group.items.forEach((item, i) => {
+        const delayMs = Math.max(0, (subT - ctx.currentTime) * 1000);
+        const idx = group.startIndex + i;
+        timers.push(setTimeout(() => onNoteStart(idx), delayMs));
+        subT += DURATION_BEATS[item.duration] * secondsPerBeat;
+      });
+    }
+
+    t += totalDuration;
+  });
+
+  const totalEndTime = t;
+
+  if (metronome) {
+    let beatIndex = 0;
+    for (let time = startTime; time < totalEndTime - 0.001; time += secondsPerBeat) {
+      scheduleClick(time, beatIndex % beatsPerMeasure === 0, activeNodes);
+      beatIndex++;
+    }
+  }
+
+  if (onEnd) {
+    const delayMs = Math.max(0, (totalEndTime - ctx.currentTime) * 1000);
+    timers.push(setTimeout(onEnd, delayMs));
+  }
+
+  return {
+    stop() {
+      const now = ctx.currentTime;
+      activeNodes.forEach(({ osc, gain }) => {
+        try {
+          gain.gain.cancelScheduledValues(now);
+          gain.gain.setValueAtTime(gain.gain.value, now);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.03);
+          osc.stop(now + 0.04);
+        } catch {
+          // 既に停止済みのノードは無視する
+        }
+      });
+      timers.forEach(clearTimeout);
+    },
+  };
+}
