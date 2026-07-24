@@ -348,7 +348,7 @@ function syncTabButtons() {
 
   const tieOk = isPair && canTie(tabData.notes, pairIndex);
   const hpOk = isPair && canHammerPull(tabData.notes, pairIndex);
-  const slideOk = isPair && canSlide(tabData.notes, pairIndex);
+  const slideOk = isPair && canSlide(tabData.notes, pairIndex, state.tuning);
 
   tabTieBtn.disabled = !tieOk;
   tabHammerPullBtn.disabled = !hpOk;
@@ -602,7 +602,7 @@ tabHammerPullBtn.addEventListener('click', () => {
 tabSlideBtn.addEventListener('click', () => {
   if (tabSlideBtn.disabled) return;
   const pairIndex = Math.min(tabSelection.start, tabSelection.end);
-  commitTab({ notes: toggleSlideAt(tabData.notes, pairIndex) });
+  commitTab({ notes: toggleSlideAt(tabData.notes, pairIndex, state.tuning) });
   renderTabView();
 });
 

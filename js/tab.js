@@ -1,5 +1,7 @@
 // TAB譜のデータモデル定義・編集操作・Undo/Redo履歴管理
 
+import { toAbsoluteSemitone } from './notes.js';
+
 export const DURATION_BEATS = {
   whole: 4,
   half: 2,
@@ -109,8 +111,20 @@ export function canHammerPull(notes, index) {
   return canLinkAsNotes(a, b) && a.string === b.string && a.fret !== b.fret;
 }
 
-export function canSlide(notes, index) {
-  return canHammerPull(notes, index);
+// スライドは異弦間でも成立するため、フレットではなく実際のピッチ(オープン弦音+フレット)で判定する
+function pitchAtEntry(tuning, entry) {
+  const openString = tuning?.[entry.string];
+  if (!openString) return null;
+  return toAbsoluteSemitone(openString.name, openString.octave) + entry.fret;
+}
+
+export function canSlide(notes, index, tuning) {
+  const a = notes[index];
+  const b = notes[index + 1];
+  if (!canLinkAsNotes(a, b)) return false;
+  const pitchA = pitchAtEntry(tuning, a);
+  const pitchB = pitchAtEntry(tuning, b);
+  return pitchA != null && pitchB != null && pitchA !== pitchB;
 }
 
 export function toggleTieAt(notes, index) {
@@ -126,8 +140,8 @@ export function toggleHammerPullAt(notes, index) {
   );
 }
 
-export function toggleSlideAt(notes, index) {
-  if (!canSlide(notes, index)) return notes;
+export function toggleSlideAt(notes, index, tuning) {
+  if (!canSlide(notes, index, tuning)) return notes;
   return notes.map((n, i) => (i === index ? { ...n, articulation: n.articulation === 'slide' ? null : 'slide' } : n));
 }
 
