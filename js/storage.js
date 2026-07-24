@@ -16,6 +16,7 @@ export function defaultSettings() {
     masterVolume: 0.8,
     tabOctaveUp: false,
     tabColorSync: false,
+    tabMetronome: false,
   };
 }
 

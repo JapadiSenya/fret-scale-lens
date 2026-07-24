@@ -95,7 +95,6 @@ let tabClipboard = null;
 let selectedDuration = 'quarter';
 let dottedInput = false;
 let pendingInputMode = 'note'; // 'note' | 'ghost'
-let metronomeOn = false;
 let playbackHandle = null;
 let playingIndex = null;
 
@@ -128,6 +127,12 @@ function syncControlsFromState() {
   masterVolumeInput.value = String(state.masterVolume);
   syncTabOctaveUpButton();
   syncTabColorSyncButton();
+  syncTabMetronomeButton();
+}
+
+function syncTabMetronomeButton() {
+  tabMetronomeBtn.classList.toggle('active', state.tabMetronome);
+  tabMetronomeBtn.setAttribute('aria-pressed', String(state.tabMetronome));
 }
 
 function syncTabOctaveUpButton() {
@@ -666,9 +671,9 @@ tabTempoInput.addEventListener('change', () => {
 });
 
 tabMetronomeBtn.addEventListener('click', () => {
-  metronomeOn = !metronomeOn;
-  tabMetronomeBtn.classList.toggle('active', metronomeOn);
-  tabMetronomeBtn.setAttribute('aria-pressed', String(metronomeOn));
+  state.tabMetronome = !state.tabMetronome;
+  syncTabMetronomeButton();
+  persist();
 });
 
 tabOctaveUpBtn.addEventListener('click', () => {
@@ -695,7 +700,7 @@ tabPlayBtn.addEventListener('click', () => {
   const startIndex = tabSelection ? Math.min(tabSelection.start, tabSelection.end) : 0;
 
   playbackHandle = playTab(tabData, state.tuning, {
-    metronome: metronomeOn,
+    metronome: state.tabMetronome,
     octaveUp: state.tabOctaveUp,
     startIndex,
     onNoteStart: (index) => {
@@ -719,6 +724,7 @@ function settingsSnapshot() {
     masterVolume: state.masterVolume,
     tabOctaveUp: state.tabOctaveUp,
     tabColorSync: state.tabColorSync,
+    tabMetronome: state.tabMetronome,
   };
 }
 
@@ -731,6 +737,7 @@ const SETTINGS_FIELD_LABELS = {
   masterVolume: '音量',
   tabOctaveUp: 'TABオクターブ上げ再生',
   tabColorSync: 'TABスケール配色連動',
+  tabMetronome: 'メトロノーム',
 };
 
 function isValidImportedTuning(value) {
@@ -817,6 +824,14 @@ function applyImportedSettings(settings) {
       state.tabColorSync = settings.tabColorSync;
     } else {
       skipped.push(SETTINGS_FIELD_LABELS.tabColorSync);
+    }
+  }
+
+  if (settings.tabMetronome !== undefined) {
+    if (typeof settings.tabMetronome === 'boolean') {
+      state.tabMetronome = settings.tabMetronome;
+    } else {
+      skipped.push(SETTINGS_FIELD_LABELS.tabMetronome);
     }
   }
 
