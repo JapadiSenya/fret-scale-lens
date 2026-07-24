@@ -85,6 +85,7 @@ const tabDisplay = document.getElementById('tab-display');
 const tabJsonDetails = document.getElementById('tab-json-details');
 const tabJsonTextarea = document.getElementById('tab-json-textarea');
 const tabJsonError = document.getElementById('tab-json-error');
+const toastContainer = document.getElementById('toast-container');
 
 let tabLibrary = loadTabLibrary();
 let tabData = tabLibrary.tabs[0];
@@ -707,8 +708,151 @@ tabPlayBtn.addEventListener('click', () => {
   syncTabJsonView();
 });
 
+// 画面上部の設定(セクション5でlocalStorageに保存している項目)のスナップショット
+function settingsSnapshot() {
+  return {
+    tuning: state.tuning.map((s) => ({ ...s })),
+    fretCount: state.fretCount,
+    key: state.key,
+    scale: state.scale,
+    displayMode: state.displayMode,
+    masterVolume: state.masterVolume,
+    tabOctaveUp: state.tabOctaveUp,
+    tabColorSync: state.tabColorSync,
+  };
+}
+
+const SETTINGS_FIELD_LABELS = {
+  tuning: 'チューニング',
+  fretCount: 'フレット数',
+  key: 'キー',
+  scale: 'スケール',
+  displayMode: '表示モード',
+  masterVolume: '音量',
+  tabOctaveUp: 'TABオクターブ上げ再生',
+  tabColorSync: 'TABスケール配色連動',
+};
+
+function isValidImportedTuning(value) {
+  return (
+    Array.isArray(value) &&
+    value.length >= MIN_STRINGS &&
+    value.length <= MAX_STRINGS &&
+    value.every(
+      (s) =>
+        s &&
+        typeof s === 'object' &&
+        NOTE_NAMES.includes(s.name) &&
+        Number.isInteger(s.octave) &&
+        OCTAVE_OPTIONS.includes(s.octave)
+    )
+  );
+}
+
+// settingsの各項目を個別に検証し、有効な項目だけstateへ反映する。
+// 項目が未指定なら何もしない(旧形式ファイル等)。値はあるが不正・非対応なら
+// その項目だけスキップし、呼び出し側への通知用にラベルを返す
+function applyImportedSettings(settings) {
+  const skipped = [];
+
+  if (settings.tuning !== undefined) {
+    if (isValidImportedTuning(settings.tuning)) {
+      state.tuning = settings.tuning.map((s) => ({ name: s.name, octave: s.octave }));
+    } else {
+      skipped.push(SETTINGS_FIELD_LABELS.tuning);
+    }
+  }
+
+  if (settings.fretCount !== undefined) {
+    if (Number.isFinite(settings.fretCount)) {
+      state.fretCount = clampFretCount(settings.fretCount);
+    } else {
+      skipped.push(SETTINGS_FIELD_LABELS.fretCount);
+    }
+  }
+
+  if (settings.key !== undefined) {
+    if (NOTE_NAMES.includes(settings.key)) {
+      state.key = settings.key;
+    } else {
+      skipped.push(SETTINGS_FIELD_LABELS.key);
+    }
+  }
+
+  if (settings.scale !== undefined) {
+    if (SCALE_LIST.some((s) => s.id === settings.scale)) {
+      state.scale = settings.scale;
+    } else {
+      skipped.push(SETTINGS_FIELD_LABELS.scale);
+    }
+  }
+
+  if (settings.displayMode !== undefined) {
+    if (settings.displayMode === 'scale' || settings.displayMode === 'function') {
+      state.displayMode = settings.displayMode;
+    } else {
+      skipped.push(SETTINGS_FIELD_LABELS.displayMode);
+    }
+  }
+
+  if (settings.masterVolume !== undefined) {
+    if (Number.isFinite(settings.masterVolume) && settings.masterVolume >= 0 && settings.masterVolume <= 1) {
+      state.masterVolume = settings.masterVolume;
+      setMasterVolume(state.masterVolume);
+    } else {
+      skipped.push(SETTINGS_FIELD_LABELS.masterVolume);
+    }
+  }
+
+  if (settings.tabOctaveUp !== undefined) {
+    if (typeof settings.tabOctaveUp === 'boolean') {
+      state.tabOctaveUp = settings.tabOctaveUp;
+    } else {
+      skipped.push(SETTINGS_FIELD_LABELS.tabOctaveUp);
+    }
+  }
+
+  if (settings.tabColorSync !== undefined) {
+    if (typeof settings.tabColorSync === 'boolean') {
+      state.tabColorSync = settings.tabColorSync;
+    } else {
+      skipped.push(SETTINGS_FIELD_LABELS.tabColorSync);
+    }
+  }
+
+  return skipped;
+}
+
+const TOAST_DURATION_MS = 6000;
+
+// モーダルではなく画面上部に非モーダルのポップアップ通知を表示する。時間経過または×クリックで消える
+function showToast(message) {
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.setAttribute('role', 'status');
+
+  const text = document.createElement('span');
+  text.textContent = message;
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'toast-close';
+  closeBtn.textContent = '×';
+  closeBtn.setAttribute('aria-label', '通知を閉じる');
+
+  toast.append(text, closeBtn);
+  toastContainer.appendChild(toast);
+
+  const timer = setTimeout(() => toast.remove(), TOAST_DURATION_MS);
+  closeBtn.addEventListener('click', () => {
+    clearTimeout(timer);
+    toast.remove();
+  });
+}
+
 tabExportBtn.addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(tabData, null, 2)], { type: 'application/json' });
+  const payload = { tab: tabData, settings: settingsSnapshot() };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -725,12 +869,28 @@ tabImportInput.addEventListener('change', async () => {
   try {
     const text = await file.text();
     const parsed = JSON.parse(text);
-    if (!parsed || !Array.isArray(parsed.notes)) throw new Error('invalid tab data');
-    tabData = { ...createTabData(), ...parsed };
+    // 新形式({tab, settings})・旧形式(tabDataそのもの)のどちらもTAB本体はそのまま取り込む
+    const tabSource = parsed && typeof parsed === 'object' && parsed.tab && typeof parsed.tab === 'object'
+      ? parsed.tab
+      : parsed;
+    if (!tabSource || !Array.isArray(tabSource.notes)) throw new Error('invalid tab data');
+
+    tabData = { ...createTabData(), ...tabSource };
     tabHistory = createHistory(tabData);
     tabSelection = null;
     syncTabLibrary();
-    renderTabView();
+
+    if (parsed && typeof parsed === 'object' && parsed.settings && typeof parsed.settings === 'object') {
+      const skipped = applyImportedSettings(parsed.settings);
+      syncControlsFromState();
+      renderStringList();
+      saveSettings(state);
+      if (skipped.length > 0) {
+        showToast(`一部の設定を読み込めなかったため現在の設定を維持しました: ${skipped.join('、')}`);
+      }
+    }
+
+    render();
   } catch (e) {
     console.warn('TAB譜のインポートに失敗しました。', e);
     window.alert('TAB譜ファイルの読み込みに失敗しました。ファイル形式を確認してください。');

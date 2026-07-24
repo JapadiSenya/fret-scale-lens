@@ -30,6 +30,8 @@
   --color-tab-bar-line: #ddd8d0;
   --color-tab-measure-invalid: rgba(217, 72, 43, 0.12);
   --color-tab-measure-number: #b0aa9c;
+  --color-toast-bg: #2a2a28;
+  --color-toast-text: #ffffff;
 }
 
 * {
@@ -597,4 +599,41 @@ dialog::backdrop {
 
 .tab-json-error.visible {
   display: block;
+}
+
+.toast-container {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 90vw;
+  background: var(--color-toast-bg);
+  color: var(--color-toast-text);
+  font-size: 0.85rem;
+  padding: 10px 12px 10px 16px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  pointer-events: auto;
+}
+
+.toast-close {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 0.85rem;
+  line-height: 1;
+  background: transparent;
+  color: var(--color-toast-text);
+  border-color: rgba(255, 255, 255, 0.4);
 }
