@@ -200,13 +200,16 @@ function renderLegend() {
 function renderStringList() {
   stringListEl.replaceChildren();
 
-  state.tuning.forEach((s, index) => {
+  // 1弦(高音弦)がフレットボード上部・リスト先頭に来るよう、低音→高音順のstate.tuningを逆順表示する
+  const total = state.tuning.length;
+  [...state.tuning].reverse().forEach((s, displayIndex) => {
+    const index = total - 1 - displayIndex;
     const row = document.createElement('div');
     row.className = 'string-row';
 
     const label = document.createElement('span');
     label.className = 'string-row-label';
-    label.textContent = `弦${index + 1}`;
+    label.textContent = `弦${displayIndex + 1}`;
 
     const nameSelect = document.createElement('select');
     nameSelect.replaceChildren(...NOTE_NAMES.map((n) => new Option(n, n)));
