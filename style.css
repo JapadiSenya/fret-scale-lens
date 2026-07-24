@@ -32,7 +32,8 @@
   --color-tab-measure-number: #b0aa9c;
   --color-toast-bg: #2a2a28;
   --color-toast-text: #ffffff;
-  --color-tab-tuplet: #8a857c;
+  --color-tab-duration: #5c5850;
+  --color-tab-tuplet: #6a4fb0;
   --color-tab-tuplet-incomplete: #d9482b;
 }
 
@@ -442,22 +443,25 @@ dialog::backdrop {
 }
 
 .tab-duration-symbol {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  height: 16px;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--color-tab-duration);
+  height: 20px;
+  line-height: 1;
 }
 
 .tab-tuplet-row {
   width: 100%;
-  height: 12px;
-  font-size: 0.65rem;
+  height: 16px;
+  font-size: 0.85rem;
+  font-weight: 700;
   line-height: 1;
   text-align: center;
   color: var(--color-tab-tuplet);
 }
 
 .tab-tuplet-row.tab-tuplet-marked {
-  border-bottom: 1px solid var(--color-tab-tuplet);
+  border-bottom: 2px solid var(--color-tab-tuplet);
 }
 
 .tab-tuplet-row.tab-tuplet-incomplete {

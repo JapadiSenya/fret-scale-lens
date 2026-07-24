@@ -74,8 +74,10 @@ export function renderTab(
 
   const tupletByIndex = new Map();
   computeTupletGroups(notes).forEach((group) => {
+    // 数字はグループの中央付近の列に表示し、ブラケット(下線)との対応がわかりやすいようにする
+    const labelIndex = group.startIndex + Math.floor((group.endIndex - group.startIndex) / 2);
     for (let i = group.startIndex; i <= group.endIndex; i++) {
-      tupletByIndex.set(i, { ...group, isStart: i === group.startIndex });
+      tupletByIndex.set(i, { ...group, isLabel: i === labelIndex });
     }
   });
 
@@ -124,7 +126,7 @@ export function renderTab(
     if (tupletInfo) {
       tupletRow.classList.add('tab-tuplet-marked');
       if (!tupletInfo.complete) tupletRow.classList.add('tab-tuplet-incomplete');
-      if (tupletInfo.isStart) tupletRow.textContent = String(tupletInfo.n);
+      if (tupletInfo.isLabel) tupletRow.textContent = String(tupletInfo.n);
     }
     col.appendChild(tupletRow);
 
