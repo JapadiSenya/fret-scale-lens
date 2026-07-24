@@ -42,21 +42,28 @@ export function createTabLibrary() {
 }
 
 export function createNoteEntry({ string, fret, duration, dotted = false }) {
-  return { type: 'note', string, fret, duration, dotted, articulation: null };
+  return { type: 'note', string, fret, duration, dotted, articulation: null, tuplet: null };
 }
 
 export function createRestEntry(duration, dotted = false) {
-  return { type: 'rest', duration, dotted, articulation: null };
+  return { type: 'rest', duration, dotted, articulation: null, tuplet: null };
 }
 
 export function createGhostEntry({ string, fret, duration, dotted = false }) {
-  return { type: 'ghost', string, fret, duration, dotted, articulation: null };
+  return { type: 'ghost', string, fret, duration, dotted, articulation: null, tuplet: null };
 }
 
-// 付点を考慮した実際の拍数
-export function getEntryBeats(entry) {
+// 付点を考慮した「見た目上の」拍数(連符でない場合はこれがそのまま実際の拍数になる)
+function notatedBeats(entry) {
   const base = DURATION_BEATS[entry.duration] ?? 1;
   return entry.dotted ? base * 1.5 : base;
+}
+
+// 連符を考慮した実際の拍数。n連符はnotatedBeatsの半分の音価をn個使ってnotatedBeats×2の長さに詰め込む
+// (例: 8分音符3連符なら、8分音符notatedBeats=0.5の2倍=四分音符1拍分を3等分する)
+export function getEntryBeats(entry) {
+  const beats = notatedBeats(entry);
+  return entry.tuplet ? (beats * 2) / entry.tuplet : beats;
 }
 
 // notes配列のafterIndexの直後にentryを挿入する(afterIndexが-1なら先頭、undefinedなら末尾)
@@ -93,6 +100,52 @@ export function setDurationRange(notes, startIndex, endIndex, duration) {
 export function setDottedRange(notes, startIndex, endIndex, dotted) {
   const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
   return notes.map((n, i) => (i >= from && i <= to ? { ...n, dotted } : n));
+}
+
+// 連符化: 選択範囲(2音符以上、durationが全て同じ)が対象。nは選択範囲の音符数をそのまま使う
+export function canTuplet(notes, startIndex, endIndex) {
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  if (to - from < 1) return false;
+  const range = notes.slice(from, to + 1);
+  if (range.some((n) => !n)) return false;
+  return range.every((n) => n.duration === range[0].duration);
+}
+
+// 選択範囲が既に(範囲サイズ=n個の)連符であれば解除、そうでなければ選択範囲のサイズをnとして連符化する
+export function toggleTupletAt(notes, startIndex, endIndex) {
+  if (!canTuplet(notes, startIndex, endIndex)) return notes;
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  const size = to - from + 1;
+  const alreadyTupleted = notes.slice(from, to + 1).every((n) => n.tuplet === size);
+  const nextTuplet = alreadyTupleted ? null : size;
+  return notes.map((n, i) => (i >= from && i <= to ? { ...n, tuplet: nextTuplet } : n));
+}
+
+// notes配列を連符グループごとにまとめる。同じn値が連続するランをn個ずつのまとまりとみなし、
+// 編集(削除等)でn個に満たなくなった不完全なグループはcomplete:falseとして返す
+// (小節長不一致警告と同様、エラー扱いにはせず表示側で軽く警告する想定)
+export function computeTupletGroups(notes) {
+  const groups = [];
+  let current = null;
+  notes.forEach((entry, i) => {
+    const n = entry.tuplet;
+    if (!n) {
+      current = null;
+      return;
+    }
+    if (!current || current.n !== n || current.count >= current.n) {
+      current = { startIndex: i, endIndex: i, n, count: 0 };
+      groups.push(current);
+    }
+    current.endIndex = i;
+    current.count += 1;
+  });
+  return groups.map(({ startIndex, endIndex, n, count }) => ({
+    startIndex,
+    endIndex,
+    n,
+    complete: count === n,
+  }));
 }
 
 function canLinkAsNotes(a, b) {

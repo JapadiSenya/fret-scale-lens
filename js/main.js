@@ -29,9 +29,11 @@ import {
   canTie,
   canHammerPull,
   canSlide,
+  canTuplet,
   toggleTieAt,
   toggleHammerPullAt,
   toggleSlideAt,
+  toggleTupletAt,
   cloneRange,
   createHistory,
   pushHistory,
@@ -69,6 +71,7 @@ const tabGhostBtn = document.getElementById('tab-ghost-btn');
 const tabTieBtn = document.getElementById('tab-tie-btn');
 const tabHammerPullBtn = document.getElementById('tab-hammer-pull-btn');
 const tabSlideBtn = document.getElementById('tab-slide-btn');
+const tabTupletBtn = document.getElementById('tab-tuplet-btn');
 const tabDeleteBtn = document.getElementById('tab-delete-btn');
 const tabUndoBtn = document.getElementById('tab-undo-btn');
 const tabRedoBtn = document.getElementById('tab-redo-btn');
@@ -355,10 +358,12 @@ function syncTabButtons() {
   const tieOk = isPair && canTie(tabData.notes, pairIndex);
   const hpOk = isPair && canHammerPull(tabData.notes, pairIndex);
   const slideOk = isPair && canSlide(tabData.notes, pairIndex, state.tuning);
+  const tupletOk = hasSelection && canTuplet(tabData.notes, tabSelection.start, tabSelection.end);
 
   tabTieBtn.disabled = !tieOk;
   tabHammerPullBtn.disabled = !hpOk;
   tabSlideBtn.disabled = !slideOk;
+  tabTupletBtn.disabled = !tupletOk;
 
   tabTieBtn.classList.toggle('active', tieOk && tabData.notes[pairIndex]?.articulation === 'tie');
   tabHammerPullBtn.classList.toggle(
@@ -366,6 +371,15 @@ function syncTabButtons() {
     hpOk && ['hammerOn', 'pullOff'].includes(tabData.notes[pairIndex]?.articulation)
   );
   tabSlideBtn.classList.toggle('active', slideOk && tabData.notes[pairIndex]?.articulation === 'slide');
+  if (tupletOk) {
+    const from = Math.min(tabSelection.start, tabSelection.end);
+    const to = Math.max(tabSelection.start, tabSelection.end);
+    const size = to - from + 1;
+    const tupleted = tabData.notes.slice(from, to + 1).every((n) => n.tuplet === size);
+    tabTupletBtn.classList.toggle('active', tupleted);
+  } else {
+    tabTupletBtn.classList.remove('active');
+  }
 
   [...durationButtonsEl.children].forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.duration === selectedDuration);
@@ -609,6 +623,12 @@ tabSlideBtn.addEventListener('click', () => {
   if (tabSlideBtn.disabled) return;
   const pairIndex = Math.min(tabSelection.start, tabSelection.end);
   commitTab({ notes: toggleSlideAt(tabData.notes, pairIndex, state.tuning) });
+  renderTabView();
+});
+
+tabTupletBtn.addEventListener('click', () => {
+  if (tabTupletBtn.disabled) return;
+  commitTab({ notes: toggleTupletAt(tabData.notes, tabSelection.start, tabSelection.end) });
   renderTabView();
 });
 

@@ -1,6 +1,6 @@
 // TAB譜表示エリアのDOM描画
 
-import { computeMeasures } from './tab.js';
+import { computeMeasures, computeTupletGroups } from './tab.js';
 import { NOTE_NAMES, noteAtFret } from './notes.js';
 import { isRootNote, isInScale, getDegreeInfo } from './scales.js';
 
@@ -72,13 +72,25 @@ export function renderTab(
   const notes = tabData.notes;
   const measures = computeMeasures(notes, tabData.timeSignature);
 
+  const tupletByIndex = new Map();
+  computeTupletGroups(notes).forEach((group) => {
+    for (let i = group.startIndex; i <= group.endIndex; i++) {
+      tupletByIndex.set(i, { ...group, isStart: i === group.startIndex });
+    }
+  });
+
   const wrapper = document.createElement('div');
   wrapper.className = 'tab-grid';
 
   const labelCol = document.createElement('div');
   labelCol.className = 'tab-string-labels';
 
-  // 各tab-colの1行目は音符長シンボル用の行なので、ラベル列にも同じ高さの空行を入れて行を揃える
+  // 各tab-colの1・2行目は連符ブラケット用・音符長シンボル用の行なので、
+  // ラベル列にも同じ高さの空行を入れて行を揃える
+  const labelSpacerTuplet = document.createElement('div');
+  labelSpacerTuplet.className = 'tab-string-label-spacer';
+  labelCol.appendChild(labelSpacerTuplet);
+
   const labelSpacer = document.createElement('div');
   labelSpacer.className = 'tab-string-label-spacer';
   labelCol.appendChild(labelSpacer);
@@ -99,9 +111,22 @@ export function renderTab(
     col.className = 'tab-col';
     if (inRange(index, selection)) col.classList.add('selected');
     if (playingIndex === index) col.classList.add('playing');
-    col.title = (DURATION_JA[entry.duration] || '') + (entry.dotted ? '(付点)' : '');
+    const tupletInfo = tupletByIndex.get(index);
+    col.title =
+      (DURATION_JA[entry.duration] || '') +
+      (entry.dotted ? '(付点)' : '') +
+      (tupletInfo ? `(${tupletInfo.n}連符)` : '');
     col.tabIndex = 0;
     col.setAttribute('role', 'button');
+
+    const tupletRow = document.createElement('div');
+    tupletRow.className = 'tab-tuplet-row';
+    if (tupletInfo) {
+      tupletRow.classList.add('tab-tuplet-marked');
+      if (!tupletInfo.complete) tupletRow.classList.add('tab-tuplet-incomplete');
+      if (tupletInfo.isStart) tupletRow.textContent = String(tupletInfo.n);
+    }
+    col.appendChild(tupletRow);
 
     const durationRow = document.createElement('div');
     durationRow.className = 'tab-duration-symbol';
@@ -112,7 +137,7 @@ export function renderTab(
       const restCell = document.createElement('div');
       restCell.className = 'tab-rest-cell';
       restCell.textContent = '休';
-      restCell.style.gridRow = `2 / span ${stringCount}`;
+      restCell.style.gridRow = `3 / span ${stringCount}`;
       col.appendChild(restCell);
       col.classList.add('tab-col-rest');
     } else {
