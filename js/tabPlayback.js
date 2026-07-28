@@ -135,13 +135,16 @@ export function scheduleClick(time, accent, activeNodes) {
 /**
  * @param {object} tabData
  * @param {{name:string, octave:number}[]} tuning
- * @param {{metronome?: boolean, octaveUp?: boolean, startIndex?: number, onNoteStart?: (index:number) => void, onEnd?: () => void}} [options]
+ * @param {{tempo?: number, timeSignature?: string, metronome?: boolean, octaveUp?: boolean, startIndex?: number, onNoteStart?: (index:number) => void, onEnd?: () => void}} [options]
  */
-export function playTab(tabData, tuning, { metronome = false, octaveUp = false, startIndex = 0, onNoteStart, onEnd } = {}) {
+export function playTab(
+  tabData,
+  tuning,
+  { tempo = 120, timeSignature = '4/4', metronome = false, octaveUp = false, startIndex = 0, onNoteStart, onEnd } = {}
+) {
   const ctx = getAudioContext();
-  const bpm = tabData.tempoEvents[0]?.bpm || 120;
-  const secondsPerBeat = 60 / bpm;
-  const { beatsPerMeasure } = parseTimeSignature(tabData.timeSignature);
+  const secondsPerBeat = 60 / tempo;
+  const { beatsPerMeasure } = parseTimeSignature(timeSignature);
   const startTime = ctx.currentTime + LOOKAHEAD_PAD;
 
   const activeNodes = [];

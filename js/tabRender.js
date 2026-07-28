@@ -59,18 +59,18 @@ function colorClassesForPitch(pitch, tuning, colorSync, key, scale, displayMode)
 
 /**
  * @param {HTMLElement} container
- * @param {{tabData: object, tuning: {name:string, octave:number}[], selection: {start:number, end:number}|null, playingIndex: number|null, key: string, scale: string, displayMode: 'scale'|'function', colorSync: boolean}} view
+ * @param {{tabData: object, tuning: {name:string, octave:number}[], timeSignature: string, selection: {start:number, end:number}|null, playingIndex: number|null, key: string, scale: string, displayMode: 'scale'|'function', colorSync: boolean}} view
  * @param {{onColumnClick?: (index:number, event:MouseEvent) => void}} [callbacks]
  */
 export function renderTab(
   container,
-  { tabData, tuning, selection, playingIndex, key, scale, displayMode, colorSync },
+  { tabData, tuning, timeSignature, selection, playingIndex, key, scale, displayMode, colorSync },
   { onColumnClick } = {}
 ) {
   const displayStrings = [...tuning].reverse();
   const stringCount = displayStrings.length;
   const notes = tabData.notes;
-  const measures = computeMeasures(notes, tabData.timeSignature);
+  const measures = computeMeasures(notes, timeSignature);
 
   const tupletByIndex = new Map();
   computeTupletGroups(notes).forEach((group) => {
