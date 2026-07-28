@@ -40,18 +40,36 @@ function frequencyForPitch(tuning, pitch, octaveUp) {
   return octaveUp ? freq * 2 : freq;
 }
 
-// タイ/ハンマリング/プリング/スライドで連結された連続音符を1つの発音グループにまとめる
-// (和音=notes.length>1のエントリ、およびゴースト(ミュート)ピッチはこれらのarticulationの
-// 連結元/連結先になれないため対象外)
+function pitchOnString(entry, stringNum) {
+  return entry.notes.find((p) => p.string === stringNum);
+}
+
+// 同じ(弦, フレット, ゴースト有無)の組み合わせを持つ和音同士か(tab.jsのcanTie判定と同じ条件を
+// 再生スケジューリング側でも確認する)
+function sameVoicingForTie(a, b) {
+  if (a.notes.length !== b.notes.length) return false;
+  const key = (p) => `${p.string}:${p.fret}:${p.ghost ? 1 : 0}`;
+  const bKeys = new Set(b.notes.map(key));
+  return a.notes.every((p) => bKeys.has(key(p)));
+}
+
+// タイ/ハンマリング/プリング/スライドで連結された連続音符を1つの発音グループにまとめる。
+// ハンマリング・プリング/スライドは単音(notes.length===1・非ゴースト)同士でのみ連結できる。
+// タイは単音・和音を問わず、ゴーストを含んでいても構成が完全一致していれば連結できる
+// (ゴーストピッチはgroup.items[0]の情報のみで1回だけ短く発音するため、連結後も正しく振る舞う)
 function groupEntries(notes) {
   const groups = [];
   notes.forEach((entry, i) => {
     const prev = notes[i - 1];
-    const linkedToPrev =
-      prev && prev.type === 'note' && entry.type === 'note' &&
-      prev.notes.length === 1 && entry.notes.length === 1 &&
-      !prev.notes[0].ghost && !entry.notes[0].ghost &&
-      ['tie', 'hammerOn', 'pullOff', 'slide'].includes(prev.articulation || '');
+    let linkedToPrev = false;
+    if (prev && prev.type === 'note' && entry.type === 'note') {
+      if (prev.articulation === 'tie') {
+        linkedToPrev = sameVoicingForTie(prev, entry);
+      } else if (['hammerOn', 'pullOff', 'slide'].includes(prev.articulation || '')) {
+        linkedToPrev =
+          prev.notes.length === 1 && entry.notes.length === 1 && !prev.notes[0].ghost && !entry.notes[0].ghost;
+      }
+    }
     if (linkedToPrev) {
       groups[groups.length - 1].items.push(entry);
     } else {
@@ -61,9 +79,9 @@ function groupEntries(notes) {
   return groups;
 }
 
-// pitchIndex: 和音の場合に鳴らす音を選ぶ添字。タイ等で連結されたグループは常に単音(notes.length===1)
-// なので、和音は必ず単独(items.length===1)のグループとしてこの関数がnotes.length回呼ばれる
-function scheduleVoice(ctx, tuning, group, pitchIndex, groupStart, secondsPerBeat, activeNodes, octaveUp) {
+// stringNum: 発音する弦番号。タイで連結された和音グループは、配列の並び順ではなく弦番号で
+// 対応するピッチを追いかけて1本のOscillatorNodeを継続させる(単音・非タイの和音は常にitems.length===1)
+function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat, activeNodes, octaveUp) {
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = 'triangle';
@@ -72,14 +90,14 @@ function scheduleVoice(ctx, tuning, group, pitchIndex, groupStart, secondsPerBea
   let totalDuration = 0;
   group.items.forEach((item, i) => {
     const dur = getEntryBeats(item) * secondsPerBeat;
-    const freq = frequencyForPitch(tuning, item.notes[pitchIndex], octaveUp);
+    const freq = frequencyForPitch(tuning, pitchOnString(item, stringNum), octaveUp);
     const prevItem = group.items[i - 1];
     if (!prevItem || prevItem.articulation !== 'slide') {
       osc.frequency.setValueAtTime(freq, t);
     }
     const nextItem = group.items[i + 1];
     if (item.articulation === 'slide' && nextItem) {
-      const nextFreq = frequencyForPitch(tuning, nextItem.notes[pitchIndex], octaveUp);
+      const nextFreq = frequencyForPitch(tuning, pitchOnString(nextItem, stringNum), octaveUp);
       osc.frequency.linearRampToValueAtTime(nextFreq, t + dur);
     }
     t += dur;
@@ -166,13 +184,13 @@ export function playTab(
     if (first.type === 'note') {
       // ゴースト(ミュート)ピッチと通常のフレット音が1つの和音に混在する場合があるため、
       // ピッチごとに振り分けて発音する(ゴーストはグループ化されない=常にitems.length===1)
-      for (let p = 0; p < first.notes.length; p++) {
-        if (first.notes[p].ghost) {
-          scheduleGhostPitch(ctx, tuning, first.notes[p], groupStart, activeNodes, octaveUp);
+      first.notes.forEach((pitch) => {
+        if (pitch.ghost) {
+          scheduleGhostPitch(ctx, tuning, pitch, groupStart, activeNodes, octaveUp);
         } else {
-          scheduleVoice(ctx, tuning, group, p, groupStart, secondsPerBeat, activeNodes, octaveUp);
+          scheduleVoice(ctx, tuning, group, pitch.string, groupStart, secondsPerBeat, activeNodes, octaveUp);
         }
-      }
+      });
     }
 
     if (onNoteStart) {

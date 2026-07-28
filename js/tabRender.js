@@ -147,7 +147,8 @@ export function renderTab(
       const pitchByRow = new Map();
       entry.notes.forEach((pitch) => pitchByRow.set(tuning.length - 1 - pitch.string, pitch));
       const isChord = entry.notes.length > 1;
-      const suffix = !isChord && entry.articulation ? ARTICULATION_SUFFIX[entry.articulation] || '' : '';
+      // タイは和音同士にも適用できるため、和音か単音かに関わらずarticulationがあれば表示する
+      const suffix = entry.articulation ? ARTICULATION_SUFFIX[entry.articulation] || '' : '';
 
       for (let row = 0; row < stringCount; row++) {
         const cell = document.createElement('div');
