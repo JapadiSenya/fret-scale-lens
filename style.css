@@ -376,6 +376,68 @@ dialog::backdrop {
   padding: 16px 20px;
 }
 
+.tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tab-bar-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tab-bar-item {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tab-bar-item.active {
+  border-color: var(--color-root);
+}
+
+.tab-bar-title {
+  border: none;
+  border-radius: 0;
+  background: var(--color-panel);
+  color: var(--color-text);
+  font-size: 0.85rem;
+  padding: 6px 10px;
+}
+
+.tab-bar-item.active .tab-bar-title {
+  background: var(--color-root);
+  color: var(--color-root-text);
+}
+
+.tab-bar-close {
+  border: none;
+  border-radius: 0;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-panel);
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  padding: 6px 8px;
+}
+
+.tab-bar-item.active .tab-bar-close {
+  background: var(--color-root);
+  color: var(--color-root-text);
+  border-left-color: rgba(255, 255, 255, 0.4);
+}
+
+#tab-add-btn {
+  padding: 6px 12px;
+}
+
 .tab-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -388,8 +450,61 @@ dialog::backdrop {
   width: 160px;
 }
 
-#tab-tempo-input {
+#tempo-input {
   width: 80px;
+}
+
+#time-signature-input {
+  width: 60px;
+}
+
+.simul-play-details {
+  position: relative;
+}
+
+.simul-play-details summary {
+  cursor: pointer;
+  font-size: 0.95rem;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-panel);
+  user-select: none;
+  list-style: none;
+}
+
+.simul-play-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.simul-play-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.simul-play-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.simul-play-empty {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
 }
 
 .tab-display {

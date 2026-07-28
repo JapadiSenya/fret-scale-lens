@@ -46,6 +46,16 @@
     </div>
 
     <div class="control-group">
+      <label for="tempo-input">テンポ(BPM)</label>
+      <input type="number" id="tempo-input" min="20" max="300">
+    </div>
+
+    <div class="control-group">
+      <label for="time-signature-input">拍子</label>
+      <input type="text" id="time-signature-input" size="5" placeholder="4/4">
+    </div>
+
+    <div class="control-group">
       <button id="tuning-detail-btn" type="button">チューニング詳細設定</button>
     </div>
   </section>
@@ -55,15 +65,15 @@
   <section id="fretboard-container" class="fretboard-container" aria-label="フレットボード"></section>
 
   <section id="tab-section" class="tab-section" aria-label="TAB譜">
+    <div id="tab-bar" class="tab-bar" role="tablist" aria-label="TAB一覧">
+      <div id="tab-bar-list" class="tab-bar-list"></div>
+      <button id="tab-add-btn" type="button" aria-label="新規TAB作成">+</button>
+    </div>
+
     <div class="tab-toolbar">
       <div class="control-group">
         <label for="tab-title-input">曲名</label>
         <input type="text" id="tab-title-input">
-      </div>
-
-      <div class="control-group">
-        <label for="tab-tempo-input">テンポ(BPM)</label>
-        <input type="number" id="tab-tempo-input" min="20" max="300">
       </div>
 
       <div class="control-group">
@@ -112,6 +122,14 @@
       </div>
 
       <div class="control-group">
+        <label>同時再生</label>
+        <details id="simul-play-details" class="simul-play-details">
+          <summary>他TABを選択</summary>
+          <div id="simul-play-list" class="simul-play-list"></div>
+        </details>
+      </div>
+
+      <div class="control-group">
         <label>表示</label>
         <div class="button-group">
           <button id="tab-color-sync-btn" type="button" aria-pressed="false">スケール配色を反映</button>
@@ -154,6 +172,22 @@
 
     <div class="dialog-actions">
       <button type="submit">閉じる</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="new-tab-dialog">
+  <form method="dialog" class="tuning-form" id="new-tab-form">
+    <h2>新規TAB作成</h2>
+
+    <div class="control-group">
+      <label for="new-tab-preset-select">チューニングプリセット</label>
+      <select id="new-tab-preset-select"></select>
+    </div>
+
+    <div class="dialog-actions">
+      <button type="button" id="new-tab-cancel-btn">キャンセル</button>
+      <button type="submit" id="new-tab-create-btn">作成</button>
     </div>
   </form>
 </dialog>
