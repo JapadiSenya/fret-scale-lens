@@ -147,8 +147,9 @@ export function canAddPitch(entry) {
 
 // notes配列のindex位置のエントリに(string, fret)を追加する。
 // 既に同じ弦が使われている場合、同じフレットなら除去(最低1音は残す)、異なるフレットなら何もしない
-// (1本の弦は同時に1音までのため)。単音→和音への遷移が発生した場合、そのエントリと
-// 直前のエントリからこのエントリへ向かうarticulationを無効化する(和音は連結先になれないため)
+// (1本の弦は同時に1音までのため)。ピッチ構成が変わることで、直前のエントリからこのエントリへの
+// articulationが無効になる場合(タイなら和音同士でもvoicingが一致しなくなった、それ以外は
+// 単音同士専用なので和音化した時点で常に無効)はクリアする
 export function addPitchToEntry(notes, index, pitch) {
   const entry = notes[index];
   if (!canAddPitch(entry)) return notes;
@@ -164,13 +165,17 @@ export function addPitchToEntry(notes, index, pitch) {
     return notes;
   }
 
-  const becameChord = entry.notes.length === 1 && nextPitches.length > 1;
+  const updatedEntry = {
+    ...entry,
+    notes: nextPitches,
+    articulation: nextPitches.length > 1 ? null : entry.articulation,
+  };
+
   return notes.map((n, i) => {
-    if (becameChord && i === index - 1 && isArticulation(n.articulation)) {
-      return { ...n, articulation: null };
-    }
-    if (i === index) {
-      return { ...n, notes: nextPitches, articulation: nextPitches.length > 1 ? null : n.articulation };
+    if (i === index) return updatedEntry;
+    if (i === index - 1 && isArticulation(n.articulation)) {
+      const stillTied = n.articulation === 'tie' && sameVoicing(n, updatedEntry);
+      if (!stillTied) return { ...n, articulation: null };
     }
     return n;
   });
@@ -223,6 +228,27 @@ function notatedBeats(entry) {
 export function getEntryBeats(entry) {
   const beats = notatedBeats(entry);
   return entry.tuplet ? (beats * 2) / entry.tuplet : beats;
+}
+
+// notes[0..index)の拍数の合計(=indexの音符が開始する時点の、先頭からの累積拍数)
+export function beatsBeforeIndex(notes, index) {
+  let beats = 0;
+  for (let i = 0; i < index && i < notes.length; i++) {
+    beats += getEntryBeats(notes[i]);
+  }
+  return beats;
+}
+
+// targetBeats(先頭からの累積拍数)の時点で鳴っている(または鳴り始める)音符のインデックスを返す。
+// targetBeatsが末尾を超えている場合はnotes.length(=再生対象が無い)を返す。
+// 複数TABの同時再生において、リズムが異なるTAB同士でも拍数を基準に開始位置を揃えるために使う
+export function indexAtBeats(notes, targetBeats) {
+  let beats = 0;
+  for (let i = 0; i < notes.length; i++) {
+    if (beats >= targetBeats - 1e-9) return i;
+    beats += getEntryBeats(notes[i]);
+  }
+  return notes.length;
 }
 
 // notes配列のafterIndexの直後にentryを挿入する(afterIndexが-1なら先頭、undefinedなら末尾)
@@ -322,10 +348,23 @@ function canLinkAsNotes(a, b) {
   );
 }
 
+// 2つのエントリが全く同じ(弦, フレット, ゴースト有無)の組み合わせで構成されているか(配列の並び順は問わない)。
+// 単音同士(notes.length === 1)なら「同じ弦・同じフレット・同じゴースト状態」の判定と同義、
+// 和音同士なら同一voicingの判定になる。ゴーストを含む音符・和音同士でも、構成が完全一致していれば
+// タイ可能(ゴーストは「1回だけ短く鳴らして残りは沈黙する」という形でタイの意味を持つため)
+function sameVoicing(a, b) {
+  if (a.notes.length !== b.notes.length) return false;
+  const key = (p) => `${p.string}:${p.fret}:${p.ghost ? 1 : 0}`;
+  const bKeys = new Set(b.notes.map(key));
+  return a.notes.every((p) => bKeys.has(key(p)));
+}
+
+// タイは単音同士だけでなく、同一voicingの和音同士にも成立する(ゴーストを含む場合は不可)
 export function canTie(notes, index) {
   const a = notes[index];
   const b = notes[index + 1];
-  return canLinkAsNotes(a, b) && a.notes[0].string === b.notes[0].string && a.notes[0].fret === b.notes[0].fret;
+  if (!a || !b || a.type !== 'note' || b.type !== 'note') return false;
+  return sameVoicing(a, b);
 }
 
 export function canHammerPull(notes, index) {
