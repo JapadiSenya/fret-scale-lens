@@ -154,7 +154,7 @@ export function renderTab(
         cell.className = 'tab-cell';
         const pitch = pitchByRow.get(row);
         if (pitch) {
-          if (entry.type === 'ghost') {
+          if (pitch.ghost) {
             cell.textContent = '✕';
             cell.classList.add('tab-cell-ghost');
           } else {

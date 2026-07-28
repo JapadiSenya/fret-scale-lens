@@ -66,26 +66,32 @@ export function setActiveTabId(library, tabId) {
   return { ...library, activeTabId: tabId };
 }
 
-export function createNoteEntry({ string, fret, duration, dotted = false }) {
-  return { type: 'note', notes: [{ string, fret }], duration, dotted, articulation: null, tuplet: null };
+// ghost: trueの場合、この弦はミュート/パーカッシブなヒット(✕表示)として扱う。
+// 和音は複数ピッチを持てるため、通常のフレット音とゴースト(ミュート弦)を1つの和音内に混在させられる
+export function createNoteEntry({ string, fret, duration, dotted = false, ghost = false }) {
+  return { type: 'note', notes: [{ string, fret, ghost }], duration, dotted, articulation: null, tuplet: null };
 }
 
 export function createRestEntry(duration, dotted = false) {
   return { type: 'rest', duration, dotted, articulation: null, tuplet: null };
 }
 
-export function createGhostEntry({ string, fret, duration, dotted = false }) {
-  return { type: 'ghost', notes: [{ string, fret }], duration, dotted, articulation: null, tuplet: null };
-}
-
-// 旧形式(string/fretをトップレベルに持つ単音エントリ)をnotes配列形式へ変換する後方互換処理
+// 旧形式(string/fretをトップレベルに持つ単音エントリ、または"ghost"をエントリ全体の型として
+// 持っていた形式)をnotes配列形式(ピッチごとにghostフラグを持つ)へ変換する後方互換処理
 export function migrateEntry(entry) {
-  if (!entry) return entry;
-  if ((entry.type === 'note' || entry.type === 'ghost') && !Array.isArray(entry.notes)) {
-    const { type, string, fret, duration, dotted, articulation, tuplet } = entry;
-    return { type, notes: [{ string, fret }], duration, dotted, articulation, tuplet };
-  }
-  return entry;
+  if (!entry || (entry.type !== 'note' && entry.type !== 'ghost')) return entry;
+
+  const wasGhostEntry = entry.type === 'ghost';
+  const pitches = Array.isArray(entry.notes) ? entry.notes : [{ string: entry.string, fret: entry.fret }];
+
+  return {
+    type: 'note',
+    notes: pitches.map((p) => ({ string: p.string, fret: p.fret, ghost: wasGhostEntry || Boolean(p.ghost) })),
+    duration: entry.duration,
+    dotted: entry.dotted,
+    articulation: entry.articulation,
+    tuplet: entry.tuplet,
+  };
 }
 
 // 旧形式(チューニング/フレット数を持たない、テンポ/拍子・曲名をTAB自身が持つ)からの後方互換処理。
@@ -136,7 +142,7 @@ export function legacyTimeSignatureOf(tabData) {
 
 // 和音(複数弦同時押さえ)への音の追加・除去が可能なエントリかどうか
 export function canAddPitch(entry) {
-  return Boolean(entry) && (entry.type === 'note' || entry.type === 'ghost');
+  return Boolean(entry) && entry.type === 'note';
 }
 
 // notes配列のindex位置のエントリに(string, fret)を追加する。
@@ -170,19 +176,18 @@ export function addPitchToEntry(notes, index, pitch) {
   });
 }
 
-// 既存の複数音符を1つの和音エントリへ統合できるか。条件: 2音符以上・全てtype(note/ghost)が同じ・
+// 既存の複数音符を1つの和音エントリへ統合できるか。条件: 2音符以上・全てtype: "note"・
 // duration/dottedが全て同じ・連符化されていない・(結合後に)同じ弦が重複しないこと
-// (異なるフレット/長さの音符をどう1つに畳み込むべきか一意に定まらないため、揃っている場合のみ許可する)
+// (異なるフレット/長さの音符をどう1つに畳み込むべきか一意に定まらないため、揃っている場合のみ許可する)。
+// ghost(ミュート)/通常のフレット音はいずれもnotes内のピッチごとの属性なので、混在していても統合できる
 export function canMergeChord(notes, startIndex, endIndex) {
   const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
   if (to - from < 1) return false;
   const range = notes.slice(from, to + 1);
-  if (range.some((n) => !n || (n.type !== 'note' && n.type !== 'ghost'))) return false;
+  if (range.some((n) => !n || n.type !== 'note')) return false;
 
   const first = range[0];
-  const sameShape = range.every(
-    (n) => n.type === first.type && n.duration === first.duration && n.dotted === first.dotted && !n.tuplet
-  );
+  const sameShape = range.every((n) => n.duration === first.duration && n.dotted === first.dotted && !n.tuplet);
   if (!sameShape) return false;
 
   const strings = range.flatMap((n) => n.notes.map((p) => p.string));
@@ -303,7 +308,7 @@ export function computeTupletGroups(notes) {
 }
 
 // タイ/ハンマリング・プリング/スライドは単音同士(notes.length === 1)の連結にのみ成立する。
-// 和音はこれらの連結先/連結元になれない
+// 和音・ゴースト(ミュート)音はこれらの連結先/連結元になれない
 function canLinkAsNotes(a, b) {
   return (
     Boolean(a) &&
@@ -311,7 +316,9 @@ function canLinkAsNotes(a, b) {
     a.type === 'note' &&
     b.type === 'note' &&
     a.notes.length === 1 &&
-    b.notes.length === 1
+    b.notes.length === 1 &&
+    !a.notes[0].ghost &&
+    !b.notes[0].ghost
   );
 }
 
