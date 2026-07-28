@@ -49,6 +49,8 @@ import {
   undoHistory,
   redoHistory,
   computeMeasures,
+  beatsBeforeIndex,
+  indexAtBeats,
   migrateTabData,
   migrateEntry,
   addTabToLibrary,
@@ -965,9 +967,11 @@ tabPlayBtn.addEventListener('click', () => {
   const others = tabLibrary.tabs.filter((t) => simultaneousTabIds.has(t.id));
   if (tabData.notes.length === 0 && others.length === 0) return;
 
-  const playingMultiple = others.length > 0;
-  // 同時再生時は同期がとれるよう全TAB冒頭から再生する。単独再生時のみ選択範囲から再生する
-  const startIndex = !playingMultiple && tabSelection ? Math.min(tabSelection.start, tabSelection.end) : 0;
+  // アクティブTABは選択位置(複数選択時は選択範囲の先頭)からそのまま再生する。
+  // 他TABはリズムが異なりインデックスの対応が取れないため、アクティブTABの開始位置を
+  // 拍数に変換し、その拍数に対応する自TAB内の位置から再生することで同期を保つ
+  const startIndex = tabSelection ? Math.min(tabSelection.start, tabSelection.end) : 0;
+  const targetBeats = beatsBeforeIndex(tabData.notes, startIndex);
 
   const handles = [];
   let remaining = 0;
@@ -994,6 +998,8 @@ tabPlayBtn.addEventListener('click', () => {
   );
 
   others.forEach((otherTab) => {
+    const otherStartIndex = indexAtBeats(otherTab.notes, targetBeats);
+    if (otherStartIndex >= otherTab.notes.length) return; // この時点で既に演奏が終わっているTABは再生しない
     remaining += 1;
     handles.push(
       playTab(otherTab, otherTab.tuning, {
@@ -1001,7 +1007,7 @@ tabPlayBtn.addEventListener('click', () => {
         timeSignature: state.timeSignature,
         metronome: false,
         octaveUp: state.tabOctaveUp,
-        startIndex: 0,
+        startIndex: otherStartIndex,
         onEnd: handleOneEnd,
       })
     );

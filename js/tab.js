@@ -225,6 +225,27 @@ export function getEntryBeats(entry) {
   return entry.tuplet ? (beats * 2) / entry.tuplet : beats;
 }
 
+// notes[0..index)の拍数の合計(=indexの音符が開始する時点の、先頭からの累積拍数)
+export function beatsBeforeIndex(notes, index) {
+  let beats = 0;
+  for (let i = 0; i < index && i < notes.length; i++) {
+    beats += getEntryBeats(notes[i]);
+  }
+  return beats;
+}
+
+// targetBeats(先頭からの累積拍数)の時点で鳴っている(または鳴り始める)音符のインデックスを返す。
+// targetBeatsが末尾を超えている場合はnotes.length(=再生対象が無い)を返す。
+// 複数TABの同時再生において、リズムが異なるTAB同士でも拍数を基準に開始位置を揃えるために使う
+export function indexAtBeats(notes, targetBeats) {
+  let beats = 0;
+  for (let i = 0; i < notes.length; i++) {
+    if (beats >= targetBeats - 1e-9) return i;
+    beats += getEntryBeats(notes[i]);
+  }
+  return notes.length;
+}
+
 // notes配列のafterIndexの直後にentryを挿入する(afterIndexが-1なら先頭、undefinedなら末尾)
 export function insertEntry(notes, entry, afterIndex) {
   const insertAt = afterIndex === undefined ? notes.length : afterIndex + 1;
