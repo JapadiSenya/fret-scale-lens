@@ -533,6 +533,9 @@ dialog::backdrop {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  /* .tab-scroll-area(padding-top:15px、小節番号用)+ .tab-measure(padding-top:4px)の
+     合計オフセットに合わせて弦の行を揃える */
+  padding-top: 19px;
   padding-right: 8px;
   border-right: 1px solid var(--color-border);
   margin-right: 6px;
