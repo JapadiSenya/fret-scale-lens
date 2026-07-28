@@ -16,8 +16,14 @@
 <main class="convert-main">
   <h2>TAB JSON形式変換ツール</h2>
   <p class="convert-hint">
-    旧フォーマット(音符エントリが<code>string</code>/<code>fret</code>を直接持つ形式)のTAB譜JSONを、
-    和音(複数弦同時押さえ)に対応した新フォーマット(<code>notes: [{string, fret}]</code>配列形式)へ変換します。
+    旧フォーマットのTAB譜JSONを最新のフォーマットへ変換します。変換内容は以下の通りです。
+  </p>
+  <ul class="convert-hint">
+    <li>音符エントリが<code>string</code>/<code>fret</code>を直接持つ形式 → 和音(複数弦同時押さえ)に対応した<code>notes: [{string, fret}]</code>配列形式</li>
+    <li>チューニング/フレット数(旧: <code>settings</code>側) → TABごとのデータ(<code>tab.tuning</code>/<code>tab.fretCount</code>)</li>
+    <li>テンポ/拍子(旧: <code>tab</code>側の<code>tempoEvents</code>/<code>timeSignature</code>) → 画面全体の設定(<code>settings.tempo</code>/<code>settings.timeSignature</code>)</li>
+  </ul>
+  <p class="convert-hint">
     TAB譜のExportファイル(<code>{ tab, settings }</code>形式)・単体の<code>tabData</code>形式のどちらも入力できます。
     既に新フォーマットのデータを入力した場合は変更なくそのまま出力されます。
   </p>
