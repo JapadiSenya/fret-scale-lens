@@ -149,6 +149,10 @@ let pendingInputMode = 'note'; // 'note' | 'ghost'
 let chordInputMode = false; // 有効時、単一選択中のエントリへ指板クリックでピッチを追加する
 let playbackHandle = null;
 let playingIndex = null;
+// 再生セッションごとに増分するトークン。onNoteStart/onEndのコールバックは、発行時点のセッションが
+// 現在も有効な場合のみ処理する(停止操作とタイマー発火がほぼ同時に起きた場合などに、既に停止済み・
+// 別セッションに切り替わった後の古いコールバックがplayingIndex等の状態を誤って書き換えるのを防ぐ)
+let playbackSessionId = 0;
 
 const DISPLAY_MODE_LABELS = {
   scale: 'スケール構成音',
@@ -533,6 +537,7 @@ function handleTabColumnClick(index, event) {
 }
 
 function stopTabPlayback() {
+  playbackSessionId++; // このセッションの古いコールバックを以後すべて無効化する
   playbackHandle?.stop();
   playbackHandle = null;
   playingIndex = null;
@@ -973,10 +978,12 @@ tabPlayBtn.addEventListener('click', () => {
   const startIndex = tabSelection ? Math.min(tabSelection.start, tabSelection.end) : 0;
   const targetBeats = beatsBeforeIndex(tabData.notes, startIndex);
 
+  const sessionId = ++playbackSessionId;
   const handles = [];
   let remaining = 0;
 
   function handleOneEnd() {
+    if (sessionId !== playbackSessionId) return; // 既に停止/別セッションへ切り替わった後の古い通知は無視する
     remaining -= 1;
     if (remaining <= 0) stopTabPlayback();
   }
@@ -990,6 +997,7 @@ tabPlayBtn.addEventListener('click', () => {
       octaveUp: state.tabOctaveUp,
       startIndex,
       onNoteStart: (index) => {
+        if (sessionId !== playbackSessionId) return;
         playingIndex = index;
         renderTabView();
       },
