@@ -161,6 +161,43 @@ export function addPitchToEntry(notes, index, pitch) {
   });
 }
 
+// 既存の複数音符を1つの和音エントリへ統合できるか。条件: 2音符以上・全てtype(note/ghost)が同じ・
+// duration/dottedが全て同じ・連符化されていない・(結合後に)同じ弦が重複しないこと
+// (異なるフレット/長さの音符をどう1つに畳み込むべきか一意に定まらないため、揃っている場合のみ許可する)
+export function canMergeChord(notes, startIndex, endIndex) {
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  if (to - from < 1) return false;
+  const range = notes.slice(from, to + 1);
+  if (range.some((n) => !n || (n.type !== 'note' && n.type !== 'ghost'))) return false;
+
+  const first = range[0];
+  const sameShape = range.every(
+    (n) => n.type === first.type && n.duration === first.duration && n.dotted === first.dotted && !n.tuplet
+  );
+  if (!sameShape) return false;
+
+  const strings = range.flatMap((n) => n.notes.map((p) => p.string));
+  return new Set(strings).size === strings.length;
+}
+
+// 選択範囲の音符を1つの和音エントリへ統合する(各エントリのnotesを結合し、選択範囲先頭の位置に配置する)。
+// 直前のエントリからこの位置へのarticulationは和音の連結先になれないため無効化する
+export function mergeToChord(notes, startIndex, endIndex) {
+  if (!canMergeChord(notes, startIndex, endIndex)) return notes;
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  const range = notes.slice(from, to + 1);
+
+  const mergedPitches = range.flatMap((n) => n.notes.map((p) => ({ ...p })));
+  const mergedEntry = { ...range[0], notes: mergedPitches, articulation: null };
+
+  const result = [...notes.slice(0, from), mergedEntry, ...notes.slice(to + 1)];
+  const prevIndex = from - 1;
+  if (prevIndex >= 0 && isArticulation(result[prevIndex].articulation)) {
+    result[prevIndex] = { ...result[prevIndex], articulation: null };
+  }
+  return result;
+}
+
 // 付点を考慮した「見た目上の」拍数(連符でない場合はこれがそのまま実際の拍数になる)
 function notatedBeats(entry) {
   const base = DURATION_BEATS[entry.duration] ?? 1;

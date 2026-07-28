@@ -38,6 +38,8 @@ import {
   canTuplet,
   canAddPitch,
   addPitchToEntry,
+  canMergeChord,
+  mergeToChord,
   toggleTieAt,
   toggleHammerPullAt,
   toggleSlideAt,
@@ -794,6 +796,16 @@ tabGhostBtn.addEventListener('click', () => {
 });
 
 tabChordBtn.addEventListener('click', () => {
+  // 複数の既入力音符を選択している場合は、和音入力モードの切り替えではなく
+  // それらを1つの和音エントリへ統合する(揃っていない場合は何もしない)
+  if (tabSelection && canMergeChord(tabData.notes, tabSelection.start, tabSelection.end)) {
+    const mergedIndex = Math.min(tabSelection.start, tabSelection.end);
+    commitTab({ notes: mergeToChord(tabData.notes, tabSelection.start, tabSelection.end) });
+    tabSelection = { start: mergedIndex, end: mergedIndex };
+    renderTabView();
+    return;
+  }
+
   chordInputMode = !chordInputMode;
   syncChordButton();
 });
