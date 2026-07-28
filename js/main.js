@@ -83,6 +83,7 @@ let tabLibrary = loadTabLibrary({ tuning: legacyTuningFallback, fretCount: legac
 saveSettings(state);
 saveTabLibrary(tabLibrary);
 
+const songTitleInput = document.getElementById('song-title-input');
 const keySelect = document.getElementById('key-select');
 const scaleSelect = document.getElementById('scale-select');
 const presetSelect = document.getElementById('preset-select');
@@ -102,6 +103,7 @@ const tabBarListEl = document.getElementById('tab-bar-list');
 const tabAddBtn = document.getElementById('tab-add-btn');
 const newTabDialog = document.getElementById('new-tab-dialog');
 const newTabForm = document.getElementById('new-tab-form');
+const newTabPartNameInput = document.getElementById('new-tab-partname-input');
 const newTabPresetSelect = document.getElementById('new-tab-preset-select');
 const newTabCancelBtn = document.getElementById('new-tab-cancel-btn');
 
@@ -168,6 +170,7 @@ function sameTuning(a, b) {
 }
 
 function syncControlsFromState() {
+  songTitleInput.value = state.songTitle;
   keySelect.value = state.key;
   scaleSelect.value = state.scale;
   tempoInput.value = state.tempo;
@@ -320,7 +323,7 @@ function renderTabBar() {
       const titleBtn = document.createElement('button');
       titleBtn.type = 'button';
       titleBtn.className = 'tab-bar-title';
-      titleBtn.textContent = t.title;
+      titleBtn.textContent = t.partName;
       titleBtn.disabled = isPlaying;
       titleBtn.setAttribute('role', 'tab');
       titleBtn.setAttribute('aria-selected', String(t.id === tabLibrary.activeTabId));
@@ -330,11 +333,11 @@ function renderTabBar() {
       closeBtn.type = 'button';
       closeBtn.className = 'tab-bar-close';
       closeBtn.textContent = '×';
-      closeBtn.setAttribute('aria-label', `${t.title}を削除`);
+      closeBtn.setAttribute('aria-label', `${t.partName}を削除`);
       closeBtn.disabled = isPlaying || tabLibrary.tabs.length <= 1;
       closeBtn.addEventListener('click', (event) => {
         event.stopPropagation();
-        if (!window.confirm(`「${t.title}」を削除しますか?`)) return;
+        if (!window.confirm(`「${t.partName}」を削除しますか?`)) return;
         deleteTab(t.id);
       });
 
@@ -371,7 +374,7 @@ function renderSimulPlayList() {
       });
 
       const text = document.createElement('span');
-      text.textContent = t.title;
+      text.textContent = t.partName;
 
       label.append(checkbox, text);
       return label;
@@ -570,7 +573,7 @@ function syncTabButtons() {
 }
 
 function renderTabView() {
-  tabTitleInput.value = tabData.title;
+  tabTitleInput.value = tabData.partName;
   renderTab(
     tabDisplay,
     {
@@ -768,7 +771,7 @@ function applyTabJsonText(rawText) {
 
   const nextTabData = {
     id: tabData.id,
-    title: typeof parsed.title === 'string' ? parsed.title : tabData.title,
+    partName: typeof parsed.partName === 'string' ? parsed.partName : tabData.partName,
     tuning: isValidImportedTuning(parsed.tuning) ? parsed.tuning.map((s) => ({ ...s })) : tabData.tuning,
     fretCount: Number.isFinite(parsed.fretCount) ? clampFretCount(parsed.fretCount) : tabData.fretCount,
     notes: parsed.notes.map(migrateEntry),
@@ -898,9 +901,15 @@ tabPasteBtn.addEventListener('click', () => {
 });
 
 tabTitleInput.addEventListener('change', () => {
-  commitTab({ title: tabTitleInput.value.trim() || '曲名未設定' });
+  commitTab({ partName: tabTitleInput.value.trim() || 'パート未設定' });
   renderTabView();
   renderTabBar();
+});
+
+songTitleInput.addEventListener('change', () => {
+  state.songTitle = songTitleInput.value.trim() || '曲名未設定';
+  songTitleInput.value = state.songTitle;
+  persist();
 });
 
 tempoInput.addEventListener('change', () => {
@@ -1002,6 +1011,7 @@ tabPlayBtn.addEventListener('click', () => {
 // 画面上部の設定(セクション5でlocalStorageに保存している項目)のスナップショット
 function settingsSnapshot() {
   return {
+    songTitle: state.songTitle,
     key: state.key,
     scale: state.scale,
     displayMode: state.displayMode,
@@ -1015,6 +1025,7 @@ function settingsSnapshot() {
 }
 
 const SETTINGS_FIELD_LABELS = {
+  songTitle: '曲名',
   key: 'キー',
   scale: 'スケール',
   displayMode: '表示モード',
@@ -1031,6 +1042,14 @@ const SETTINGS_FIELD_LABELS = {
 // その項目だけスキップし、呼び出し側への通知用にラベルを返す
 function applyImportedSettings(settings) {
   const skipped = [];
+
+  if (settings.songTitle !== undefined) {
+    if (typeof settings.songTitle === 'string' && settings.songTitle.trim()) {
+      state.songTitle = settings.songTitle;
+    } else {
+      skipped.push(SETTINGS_FIELD_LABELS.songTitle);
+    }
+  }
 
   if (settings.key !== undefined) {
     if (NOTE_NAMES.includes(settings.key)) {
@@ -1141,7 +1160,7 @@ tabExportBtn.addEventListener('click', () => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${tabData.title || 'tab'}.json`;
+  a.download = `${state.songTitle || 'song'}-${tabData.partName || 'part'}.json`;
   a.click();
   URL.revokeObjectURL(url);
 });
@@ -1237,6 +1256,7 @@ function debounce(fn, waitMs) {
 
 tabAddBtn.addEventListener('click', () => {
   if (playbackHandle) return;
+  newTabPartNameInput.value = '';
   newTabPresetSelect.value = TUNING_PRESETS[0].id;
   newTabDialog.showModal();
 });
@@ -1247,7 +1267,8 @@ newTabCancelBtn.addEventListener('click', () => {
 
 newTabForm.addEventListener('submit', () => {
   const preset = findPreset(newTabPresetSelect.value) || TUNING_PRESETS[0];
-  const newTab = createTabData({ tuning: preset.strings.map((s) => ({ ...s })) });
+  const partName = newTabPartNameInput.value.trim() || 'パート未設定';
+  const newTab = createTabData({ partName, tuning: preset.strings.map((s) => ({ ...s })) });
   tabLibrary = addTabToLibrary(tabLibrary, newTab);
   switchToTab(newTab.id);
 });

@@ -21,6 +21,11 @@
 <main>
   <section class="controls" aria-label="コントロール">
     <div class="control-group">
+      <label for="song-title-input">曲名</label>
+      <input type="text" id="song-title-input">
+    </div>
+
+    <div class="control-group">
       <label for="key-select">キー</label>
       <select id="key-select"></select>
     </div>
@@ -72,7 +77,7 @@
 
     <div class="tab-toolbar">
       <div class="control-group">
-        <label for="tab-title-input">曲名</label>
+        <label for="tab-title-input">パート名</label>
         <input type="text" id="tab-title-input">
       </div>
 
@@ -179,6 +184,11 @@
 <dialog id="new-tab-dialog">
   <form method="dialog" class="tuning-form" id="new-tab-form">
     <h2>新規TAB作成</h2>
+
+    <div class="control-group">
+      <label for="new-tab-partname-input">パート名</label>
+      <input type="text" id="new-tab-partname-input" placeholder="パート未設定">
+    </div>
 
     <div class="control-group">
       <label for="new-tab-preset-select">チューニングプリセット</label>

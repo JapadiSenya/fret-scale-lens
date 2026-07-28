@@ -450,6 +450,11 @@ dialog::backdrop {
   width: 160px;
 }
 
+#song-title-input,
+#new-tab-partname-input {
+  width: 160px;
+}
+
 #tempo-input {
   width: 80px;
 }
