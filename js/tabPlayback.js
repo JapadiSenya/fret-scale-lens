@@ -32,21 +32,23 @@ function scheduleEnvelope(gain, startTime, duration, peak = VOICE_PEAK_GAIN) {
   return releaseEnd;
 }
 
-function frequencyForEntry(tuning, entry, octaveUp) {
-  const openString = tuning[entry.string];
+function frequencyForPitch(tuning, pitch, octaveUp) {
+  const openString = tuning[pitch.string];
   if (!openString) return null;
-  const note = noteAtFret(openString.name, openString.octave, entry.fret);
+  const note = noteAtFret(openString.name, openString.octave, pitch.fret);
   const freq = frequencyOf(note.name, note.octave);
   return octaveUp ? freq * 2 : freq;
 }
 
 // タイ/ハンマリング/プリング/スライドで連結された連続音符を1つの発音グループにまとめる
+// (和音=notes.length>1のエントリはこれらのarticulationの連結元/連結先になれないため対象外)
 function groupEntries(notes) {
   const groups = [];
   notes.forEach((entry, i) => {
     const prev = notes[i - 1];
     const linkedToPrev =
       prev && prev.type === 'note' && entry.type === 'note' &&
+      prev.notes.length === 1 && entry.notes.length === 1 &&
       ['tie', 'hammerOn', 'pullOff', 'slide'].includes(prev.articulation || '');
     if (linkedToPrev) {
       groups[groups.length - 1].items.push(entry);
@@ -57,7 +59,9 @@ function groupEntries(notes) {
   return groups;
 }
 
-function scheduleVoice(ctx, tuning, group, groupStart, secondsPerBeat, activeNodes, octaveUp) {
+// pitchIndex: 和音の場合に鳴らす音を選ぶ添字。タイ等で連結されたグループは常に単音(notes.length===1)
+// なので、和音は必ず単独(items.length===1)のグループとしてこの関数がnotes.length回呼ばれる
+function scheduleVoice(ctx, tuning, group, pitchIndex, groupStart, secondsPerBeat, activeNodes, octaveUp) {
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = 'triangle';
@@ -66,14 +70,14 @@ function scheduleVoice(ctx, tuning, group, groupStart, secondsPerBeat, activeNod
   let totalDuration = 0;
   group.items.forEach((item, i) => {
     const dur = getEntryBeats(item) * secondsPerBeat;
-    const freq = frequencyForEntry(tuning, item, octaveUp);
+    const freq = frequencyForPitch(tuning, item.notes[pitchIndex], octaveUp);
     const prevItem = group.items[i - 1];
     if (!prevItem || prevItem.articulation !== 'slide') {
       osc.frequency.setValueAtTime(freq, t);
     }
     const nextItem = group.items[i + 1];
     if (item.articulation === 'slide' && nextItem) {
-      const nextFreq = frequencyForEntry(tuning, nextItem, octaveUp);
+      const nextFreq = frequencyForPitch(tuning, nextItem.notes[pitchIndex], octaveUp);
       osc.frequency.linearRampToValueAtTime(nextFreq, t + dur);
     }
     t += dur;
@@ -89,22 +93,25 @@ function scheduleVoice(ctx, tuning, group, groupStart, secondsPerBeat, activeNod
   activeNodes.push({ osc, gain });
 }
 
+// 和音の場合はnotes配列内の各ピッチを同時に発音する
 function scheduleGhost(ctx, tuning, entry, startTime, activeNodes, octaveUp) {
-  const freq = frequencyForEntry(tuning, entry, octaveUp);
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.type = 'triangle';
-  osc.frequency.setValueAtTime(freq, startTime);
+  entry.notes.forEach((pitch) => {
+    const freq = frequencyForPitch(tuning, pitch, octaveUp);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, startTime);
 
-  gain.gain.setValueAtTime(0, startTime);
-  gain.gain.linearRampToValueAtTime(0.15, startTime + 0.005);
-  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.12);
+    gain.gain.setValueAtTime(0, startTime);
+    gain.gain.linearRampToValueAtTime(0.15, startTime + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.12);
 
-  osc.connect(gain);
-  gain.connect(getMasterGain());
-  osc.start(startTime);
-  osc.stop(startTime + 0.15);
-  activeNodes.push({ osc, gain });
+    osc.connect(gain);
+    gain.connect(getMasterGain());
+    osc.start(startTime);
+    osc.stop(startTime + 0.15);
+    activeNodes.push({ osc, gain });
+  });
 }
 
 export function scheduleClick(time, accent, activeNodes) {
@@ -154,7 +161,9 @@ export function playTab(tabData, tuning, { metronome = false, octaveUp = false, 
     const first = group.items[0];
 
     if (first.type === 'note') {
-      scheduleVoice(ctx, tuning, group, groupStart, secondsPerBeat, activeNodes, octaveUp);
+      for (let p = 0; p < first.notes.length; p++) {
+        scheduleVoice(ctx, tuning, group, p, groupStart, secondsPerBeat, activeNodes, octaveUp);
+      }
     } else if (first.type === 'ghost') {
       scheduleGhost(ctx, tuning, first, groupStart, activeNodes, octaveUp);
     }
