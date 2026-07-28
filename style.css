@@ -51,6 +51,10 @@ body {
 }
 
 .app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   padding: 16px 24px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-panel);
@@ -60,6 +64,17 @@ body {
   margin: 0;
   font-size: 1.25rem;
   letter-spacing: 0.02em;
+}
+
+.app-header-link {
+  font-size: 0.85rem;
+  color: var(--color-in-scale);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.app-header-link:hover {
+  text-decoration: underline;
 }
 
 main {
@@ -631,6 +646,38 @@ dialog::backdrop {
 
 .tab-json-error.visible {
   display: block;
+}
+
+.convert-main {
+  max-width: 900px;
+}
+
+.convert-hint {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  line-height: 1.7;
+  margin: 0 0 20px;
+}
+
+.convert-hint code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.85em;
+}
+
+.convert-section {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+}
+
+.convert-section .control-group {
+  margin-bottom: 16px;
+}
+
+.convert-section .control-group:last-child {
+  margin-bottom: 0;
 }
 
 .toast-container {
