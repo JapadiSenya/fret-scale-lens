@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>fret-scale-lens - TAB JSON形式変換ツール</title>
+<meta name="description" content="fret-scale-lensのTAB譜JSONを旧フォーマットから和音対応の新フォーマットへ変換するツール">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="app-header">
+  <h1>fret-scale-lens</h1>
+  <a class="app-header-link" href="index.html">← フレットボードに戻る</a>
+</header>
+
+<main class="convert-main">
+  <h2>TAB JSON形式変換ツール</h2>
+  <p class="convert-hint">
+    旧フォーマット(音符エントリが<code>string</code>/<code>fret</code>を直接持つ形式)のTAB譜JSONを、
+    和音(複数弦同時押さえ)に対応した新フォーマット(<code>notes: [{string, fret}]</code>配列形式)へ変換します。
+    TAB譜のExportファイル(<code>{ tab, settings }</code>形式)・単体の<code>tabData</code>形式のどちらも入力できます。
+    既に新フォーマットのデータを入力した場合は変更なくそのまま出力されます。
+  </p>
+
+  <section class="convert-section">
+    <div class="control-group">
+      <label for="convert-file-input">JSONファイルを選択</label>
+      <input type="file" id="convert-file-input" accept="application/json">
+    </div>
+
+    <div class="control-group">
+      <label for="convert-input-textarea">またはJSONを直接貼り付け</label>
+      <textarea
+        id="convert-input-textarea"
+        class="tab-json-textarea"
+        spellcheck="false"
+        placeholder="ここに変換したいTAB譜JSONを貼り付けてください"
+      ></textarea>
+    </div>
+
+    <div id="convert-error" class="tab-json-error" role="alert"></div>
+  </section>
+
+  <section class="convert-section">
+    <div class="control-group">
+      <label for="convert-output-textarea">変換後のJSON</label>
+      <textarea id="convert-output-textarea" class="tab-json-textarea" spellcheck="false" readonly></textarea>
+    </div>
+    <button id="convert-download-btn" type="button" disabled>ダウンロード</button>
+  </section>
+</main>
+
+<script type="module" src="js/convert.js"></script>
+</body>
+</html>
