@@ -30,6 +30,8 @@ import {
   canHammerPull,
   canSlide,
   canTuplet,
+  canAddPitch,
+  addPitchToEntry,
   toggleTieAt,
   toggleHammerPullAt,
   toggleSlideAt,
@@ -40,6 +42,8 @@ import {
   undoHistory,
   redoHistory,
   computeMeasures,
+  migrateTabData,
+  migrateEntry,
 } from './tab.js';
 import { renderTab } from './tabRender.js';
 import { playTab } from './tabPlayback.js';
@@ -68,6 +72,7 @@ const durationButtonsEl = document.getElementById('duration-buttons');
 const tabRestBtn = document.getElementById('tab-rest-btn');
 const tabDottedBtn = document.getElementById('tab-dotted-btn');
 const tabGhostBtn = document.getElementById('tab-ghost-btn');
+const tabChordBtn = document.getElementById('tab-chord-btn');
 const tabTieBtn = document.getElementById('tab-tie-btn');
 const tabHammerPullBtn = document.getElementById('tab-hammer-pull-btn');
 const tabSlideBtn = document.getElementById('tab-slide-btn');
@@ -98,6 +103,7 @@ let tabClipboard = null;
 let selectedDuration = 'quarter';
 let dottedInput = false;
 let pendingInputMode = 'note'; // 'note' | 'ghost'
+let chordInputMode = false; // 有効時、単一選択中のエントリへ指板クリックでピッチを追加する
 let playbackHandle = null;
 let playingIndex = null;
 
@@ -283,6 +289,11 @@ function syncGhostButton() {
   tabGhostBtn.setAttribute('aria-pressed', String(active));
 }
 
+function syncChordButton() {
+  tabChordBtn.classList.toggle('active', chordInputMode);
+  tabChordBtn.setAttribute('aria-pressed', String(chordInputMode));
+}
+
 function syncDottedButton() {
   tabDottedBtn.classList.toggle('active', dottedInput);
   tabDottedBtn.setAttribute('aria-pressed', String(dottedInput));
@@ -302,16 +313,25 @@ function commitTab(partialChanges) {
 }
 
 function handleFretboardNoteInput(stringIndex, fret) {
+  const singleSelected =
+    tabSelection && tabSelection.start === tabSelection.end ? tabSelection.start : undefined;
+
+  // 和音入力モード中、単一の音符/ゴーストノートを選択していれば新規挿入せずそのエントリにピッチを追加する
+  if (chordInputMode && singleSelected !== undefined && canAddPitch(tabData.notes[singleSelected])) {
+    commitTab({ notes: addPitchToEntry(tabData.notes, singleSelected, { string: stringIndex, fret }) });
+    renderTabView();
+    return;
+  }
+
   const isGhost = pendingInputMode === 'ghost';
   const entry = isGhost
     ? createGhostEntry({ string: stringIndex, fret, duration: selectedDuration, dotted: dottedInput })
     : createNoteEntry({ string: stringIndex, fret, duration: selectedDuration, dotted: dottedInput });
 
-  const singleSelected =
-    tabSelection && tabSelection.start === tabSelection.end ? tabSelection.start : undefined;
   commitTab({ notes: insertEntry(tabData.notes, entry, singleSelected) });
 
-  tabSelection = singleSelected !== undefined ? { start: singleSelected + 1, end: singleSelected + 1 } : null;
+  const insertedIndex = singleSelected !== undefined ? singleSelected + 1 : tabData.notes.length - 1;
+  tabSelection = { start: insertedIndex, end: insertedIndex };
   if (isGhost) {
     pendingInputMode = 'note';
     syncGhostButton();
@@ -426,9 +446,10 @@ function isFlatObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-// {"key":"value",...} → {"key": "value", ...} のようにコロン・カンマの後ろにスペースを補う(1オブジェクト1行表示用)
+// {"key":"value",...} → {"key": "value", ...} のようにコロン・カンマの後ろにスペースを補う(1オブジェクト1行表示用)。
+// 和音の`notes`のようなネストしたオブジェクト配列(...},{...)の区切りにもスペースを補う
 function formatFlatObjectLine(obj) {
-  return JSON.stringify(obj).replace(/":/g, '": ').replace(/,"/g, ', "');
+  return JSON.stringify(obj).replace(/":/g, '": ').replace(/,"/g, ', "').replace(/\},\{/g, '}, {');
 }
 
 // notes配列を1音符1行で整形しつつ、TAB表示上の小節の区切りに合わせて空行を挿入する
@@ -574,7 +595,7 @@ function applyTabJsonText(rawText) {
     timeSignature: typeof parsed.timeSignature === 'string' ? parsed.timeSignature : tabData.timeSignature,
     tempoEvents:
       Array.isArray(parsed.tempoEvents) && parsed.tempoEvents.length > 0 ? parsed.tempoEvents : tabData.tempoEvents,
-    notes: parsed.notes,
+    notes: parsed.notes.map(migrateEntry),
   };
   tabHistory = pushHistory(tabHistory, nextTabData);
   tabData = tabHistory.present;
@@ -594,6 +615,11 @@ tabRestBtn.addEventListener('click', () => {
 tabGhostBtn.addEventListener('click', () => {
   pendingInputMode = pendingInputMode === 'ghost' ? 'note' : 'ghost';
   syncGhostButton();
+});
+
+tabChordBtn.addEventListener('click', () => {
+  chordInputMode = !chordInputMode;
+  syncChordButton();
 });
 
 tabDottedBtn.addEventListener('click', () => {
@@ -910,7 +936,7 @@ tabImportInput.addEventListener('change', async () => {
       : parsed;
     if (!tabSource || !Array.isArray(tabSource.notes)) throw new Error('invalid tab data');
 
-    tabData = { ...createTabData(), ...tabSource };
+    tabData = migrateTabData({ ...createTabData(), ...tabSource });
     tabHistory = createHistory(tabData);
     tabSelection = null;
     syncTabLibrary();
@@ -966,6 +992,7 @@ syncControlsFromState();
 renderStringList();
 populateDurationButtons();
 syncGhostButton();
+syncChordButton();
 syncDottedButton();
 setMasterVolume(state.masterVolume);
 render();

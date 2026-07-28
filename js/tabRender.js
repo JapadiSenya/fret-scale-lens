@@ -35,12 +35,12 @@ function inRange(index, selection) {
   return index >= from && index <= to;
 }
 
-// フレットボード側(render.js)と同じ配色ルールをTAB譜の数字にも適用する
-function colorClassesForEntry(entry, tuning, colorSync, key, scale, displayMode) {
-  if (!colorSync || entry.type !== 'note') return [];
-  const openString = tuning[entry.string];
+// フレットボード側(render.js)と同じ配色ルールをTAB譜の数字にも適用する(1音ごとに判定する)
+function colorClassesForPitch(pitch, tuning, colorSync, key, scale, displayMode) {
+  if (!colorSync) return [];
+  const openString = tuning[pitch.string];
   if (!openString) return [];
-  const note = noteAtFret(openString.name, openString.octave, entry.fret);
+  const note = noteAtFret(openString.name, openString.octave, pitch.fret);
   const noteIndex = NOTE_NAMES.indexOf(note.name);
   const rootIndex = NOTE_NAMES.indexOf(key);
   const root = isRootNote(noteIndex, rootIndex);
@@ -143,19 +143,24 @@ export function renderTab(
       col.appendChild(restCell);
       col.classList.add('tab-col-rest');
     } else {
-      const rowOfEntry = tuning.length - 1 - entry.string; // 表示上の行(上=高音弦)
+      // 表示上の行(上=高音弦)ごとに、そこに鳴らすピッチがあれば表示する(和音は複数行が埋まる)
+      const pitchByRow = new Map();
+      entry.notes.forEach((pitch) => pitchByRow.set(tuning.length - 1 - pitch.string, pitch));
+      const isChord = entry.notes.length > 1;
+      const suffix = !isChord && entry.articulation ? ARTICULATION_SUFFIX[entry.articulation] || '' : '';
+
       for (let row = 0; row < stringCount; row++) {
         const cell = document.createElement('div');
         cell.className = 'tab-cell';
-        if (row === rowOfEntry) {
+        const pitch = pitchByRow.get(row);
+        if (pitch) {
           if (entry.type === 'ghost') {
             cell.textContent = '✕';
             cell.classList.add('tab-cell-ghost');
           } else {
-            const suffix = entry.articulation ? ARTICULATION_SUFFIX[entry.articulation] || '' : '';
-            cell.textContent = `${entry.fret}${suffix}`;
+            cell.textContent = `${pitch.fret}${suffix}`;
             cell.classList.add('tab-cell-note');
-            colorClassesForEntry(entry, tuning, colorSync, key, scale, displayMode).forEach((c) =>
+            colorClassesForPitch(pitch, tuning, colorSync, key, scale, displayMode).forEach((c) =>
               cell.classList.add(c)
             );
           }
@@ -165,6 +170,7 @@ export function renderTab(
         }
         col.appendChild(cell);
       }
+      if (isChord) col.classList.add('tab-col-chord');
     }
 
     col.addEventListener('click', (event) => onColumnClick?.(index, event));
