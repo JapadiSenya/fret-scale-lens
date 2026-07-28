@@ -1,6 +1,7 @@
 // TAB譜のデータモデル定義・編集操作・Undo/Redo履歴管理
 
 import { toAbsoluteSemitone } from './notes.js';
+import { TUNING_PRESETS, DEFAULT_FRET_COUNT } from './tuning.js';
 
 export const DURATION_BEATS = {
   whole: 4,
@@ -30,15 +31,39 @@ export function createTabData(overrides = {}) {
   return {
     id: generateId(),
     title: '曲名未設定',
-    timeSignature: '4/4',
-    tempoEvents: [{ atIndex: 0, bpm: 120 }],
+    tuning: TUNING_PRESETS[0].strings.map((s) => ({ ...s })),
+    fretCount: DEFAULT_FRET_COUNT,
     notes: [],
     ...overrides,
   };
 }
 
 export function createTabLibrary() {
-  return { tabs: [createTabData()] };
+  const tab = createTabData();
+  return { activeTabId: tab.id, tabs: [tab] };
+}
+
+// tabLibraryへの新規TAB追加(activeTabIdは変更しない。切り替えは呼び出し側でsetActiveTabIdを使う)
+export function addTabToLibrary(library, tabData) {
+  return { ...library, tabs: [...library.tabs, tabData] };
+}
+
+// TAB削除。最低1つのTABは維持する(残り1つの場合は何もしない)。
+// アクティブTABを削除した場合、削除位置に隣接するTABへ自動的に切り替える
+export function removeTabFromLibrary(library, tabId) {
+  if (library.tabs.length <= 1) return library;
+  const index = library.tabs.findIndex((t) => t.id === tabId);
+  if (index === -1) return library;
+
+  const tabs = library.tabs.filter((t) => t.id !== tabId);
+  const activeTabId =
+    library.activeTabId === tabId ? tabs[Math.min(index, tabs.length - 1)].id : library.activeTabId;
+  return { ...library, tabs, activeTabId };
+}
+
+export function setActiveTabId(library, tabId) {
+  if (!library.tabs.some((t) => t.id === tabId)) return library;
+  return { ...library, activeTabId: tabId };
 }
 
 export function createNoteEntry({ string, fret, duration, dotted = false }) {
@@ -63,8 +88,41 @@ export function migrateEntry(entry) {
   return entry;
 }
 
-export function migrateTabData(tabData) {
-  return { ...tabData, notes: (tabData.notes || []).map(migrateEntry) };
+// 旧形式(チューニング/フレット数を持たない、テンポ/拍子をTAB自身が持つ)からの後方互換処理。
+// tuning/fretCountが無い場合はfallback(呼び出し側が把握している旧・画面設定など)、
+// それも無ければアプリのデフォルトを採用する。旧フィールドのtempoEvents/timeSignatureは
+// (グローバル設定側での採用は呼び出し側の責務とし)ここでは単純に取り除く
+export function migrateTabData(tabData, fallback = {}) {
+  const tuning =
+    Array.isArray(tabData.tuning) && tabData.tuning.length > 0
+      ? tabData.tuning
+      : Array.isArray(fallback.tuning) && fallback.tuning.length > 0
+        ? fallback.tuning
+        : TUNING_PRESETS[0].strings;
+  const fretCount = Number.isFinite(tabData.fretCount)
+    ? tabData.fretCount
+    : Number.isFinite(fallback.fretCount)
+      ? fallback.fretCount
+      : DEFAULT_FRET_COUNT;
+
+  const { tempoEvents, timeSignature, ...rest } = tabData;
+  return {
+    ...rest,
+    tuning: tuning.map((s) => ({ ...s })),
+    fretCount,
+    notes: (tabData.notes || []).map(migrateEntry),
+  };
+}
+
+// 旧形式のtabDataが持っていたテンポ/拍子を取り出す(グローバル設定への採用可否は呼び出し側が判断する)
+export function legacyTempoOf(tabData) {
+  return Array.isArray(tabData?.tempoEvents) && tabData.tempoEvents.length > 0
+    ? tabData.tempoEvents[0].bpm
+    : null;
+}
+
+export function legacyTimeSignatureOf(tabData) {
+  return typeof tabData?.timeSignature === 'string' ? tabData.timeSignature : null;
 }
 
 // 和音(複数弦同時押さえ)への音の追加・除去が可能なエントリかどうか
