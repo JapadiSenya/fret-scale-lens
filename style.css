@@ -35,6 +35,8 @@
   --color-tab-duration: #5c5850;
   --color-tab-tuplet: #6a4fb0;
   --color-tab-tuplet-incomplete: #d9482b;
+  --color-tab-chord-bg: rgba(47, 111, 176, 0.08);
+  --color-tab-chord-border: rgba(47, 111, 176, 0.35);
 }
 
 * {
@@ -49,6 +51,10 @@ body {
 }
 
 .app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   padding: 16px 24px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-panel);
@@ -58,6 +64,17 @@ body {
   margin: 0;
   font-size: 1.25rem;
   letter-spacing: 0.02em;
+}
+
+.app-header-link {
+  font-size: 0.85rem;
+  color: var(--color-in-scale);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.app-header-link:hover {
+  text-decoration: underline;
 }
 
 main {
@@ -442,6 +459,11 @@ dialog::backdrop {
   outline: 2px solid var(--color-text);
 }
 
+.tab-col-chord {
+  background: var(--color-tab-chord-bg);
+  border: 1px solid var(--color-tab-chord-border);
+}
+
 .tab-duration-symbol {
   font-size: 1.15rem;
   font-weight: 600;
@@ -624,6 +646,38 @@ dialog::backdrop {
 
 .tab-json-error.visible {
   display: block;
+}
+
+.convert-main {
+  max-width: 900px;
+}
+
+.convert-hint {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  line-height: 1.7;
+  margin: 0 0 20px;
+}
+
+.convert-hint code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.85em;
+}
+
+.convert-section {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+}
+
+.convert-section .control-group {
+  margin-bottom: 16px;
+}
+
+.convert-section .control-group:last-child {
+  margin-bottom: 0;
 }
 
 .toast-container {
