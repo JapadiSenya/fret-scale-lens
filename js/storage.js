@@ -7,6 +7,7 @@ const TAB_STORAGE_KEY = 'fretScaleLens.tabLibrary';
 
 export function defaultSettings() {
   return {
+    songTitle: '曲名未設定',
     key: 'C',
     scale: 'major',
     displayMode: 'scale',

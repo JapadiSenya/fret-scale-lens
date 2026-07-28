@@ -66,8 +66,13 @@ function convertPayload(parsed) {
 }
 
 function fileNameFor(payload) {
-  const title = payload?.tab?.title ?? payload?.title;
-  return typeof title === 'string' && title.trim() ? `${title.trim()}.json` : 'converted.json';
+  const partName = payload?.tab?.partName;
+  const songTitle = payload?.settings?.songTitle;
+  if (typeof songTitle === 'string' && songTitle.trim() && typeof partName === 'string' && partName.trim()) {
+    return `${songTitle.trim()}-${partName.trim()}.json`;
+  }
+  if (typeof partName === 'string' && partName.trim()) return `${partName.trim()}.json`;
+  return 'converted.json';
 }
 
 function runConversion(text) {

@@ -30,7 +30,7 @@ function generateId() {
 export function createTabData(overrides = {}) {
   return {
     id: generateId(),
-    title: '曲名未設定',
+    partName: 'パート未設定',
     tuning: TUNING_PRESETS[0].strings.map((s) => ({ ...s })),
     fretCount: DEFAULT_FRET_COUNT,
     notes: [],
@@ -88,10 +88,12 @@ export function migrateEntry(entry) {
   return entry;
 }
 
-// 旧形式(チューニング/フレット数を持たない、テンポ/拍子をTAB自身が持つ)からの後方互換処理。
+// 旧形式(チューニング/フレット数を持たない、テンポ/拍子・曲名をTAB自身が持つ)からの後方互換処理。
 // tuning/fretCountが無い場合はfallback(呼び出し側が把握している旧・画面設定など)、
 // それも無ければアプリのデフォルトを採用する。旧フィールドのtempoEvents/timeSignatureは
-// (グローバル設定側での採用は呼び出し側の責務とし)ここでは単純に取り除く
+// (グローバル設定側での採用は呼び出し側の責務とし)ここでは単純に取り除く。
+// partNameが無くtitle(旧: 曲名)がある場合は、意味合いは変わるがテキストを失わないよう
+// そのままpartNameとして採用する
 export function migrateTabData(tabData, fallback = {}) {
   const tuning =
     Array.isArray(tabData.tuning) && tabData.tuning.length > 0
@@ -104,10 +106,17 @@ export function migrateTabData(tabData, fallback = {}) {
     : Number.isFinite(fallback.fretCount)
       ? fallback.fretCount
       : DEFAULT_FRET_COUNT;
+  const partName =
+    typeof tabData.partName === 'string'
+      ? tabData.partName
+      : typeof tabData.title === 'string'
+        ? tabData.title
+        : 'パート未設定';
 
-  const { tempoEvents, timeSignature, ...rest } = tabData;
+  const { tempoEvents, timeSignature, title, ...rest } = tabData;
   return {
     ...rest,
+    partName,
     tuning: tuning.map((s) => ({ ...s })),
     fretCount,
     notes: (tabData.notes || []).map(migrateEntry),
