@@ -41,7 +41,8 @@ function frequencyForPitch(tuning, pitch, octaveUp) {
 }
 
 // タイ/ハンマリング/プリング/スライドで連結された連続音符を1つの発音グループにまとめる
-// (和音=notes.length>1のエントリはこれらのarticulationの連結元/連結先になれないため対象外)
+// (和音=notes.length>1のエントリ、およびゴースト(ミュート)ピッチはこれらのarticulationの
+// 連結元/連結先になれないため対象外)
 function groupEntries(notes) {
   const groups = [];
   notes.forEach((entry, i) => {
@@ -49,6 +50,7 @@ function groupEntries(notes) {
     const linkedToPrev =
       prev && prev.type === 'note' && entry.type === 'note' &&
       prev.notes.length === 1 && entry.notes.length === 1 &&
+      !prev.notes[0].ghost && !entry.notes[0].ghost &&
       ['tie', 'hammerOn', 'pullOff', 'slide'].includes(prev.articulation || '');
     if (linkedToPrev) {
       groups[groups.length - 1].items.push(entry);
@@ -93,25 +95,23 @@ function scheduleVoice(ctx, tuning, group, pitchIndex, groupStart, secondsPerBea
   activeNodes.push({ osc, gain });
 }
 
-// 和音の場合はnotes配列内の各ピッチを同時に発音する
-function scheduleGhost(ctx, tuning, entry, startTime, activeNodes, octaveUp) {
-  entry.notes.forEach((pitch) => {
-    const freq = frequencyForPitch(tuning, pitch, octaveUp);
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(freq, startTime);
+// ゴースト(ミュート)ピッチ1音分を、通知された長さに関わらず短いパーカッシブな減衰で発音する
+function scheduleGhostPitch(ctx, tuning, pitch, startTime, activeNodes, octaveUp) {
+  const freq = frequencyForPitch(tuning, pitch, octaveUp);
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(freq, startTime);
 
-    gain.gain.setValueAtTime(0, startTime);
-    gain.gain.linearRampToValueAtTime(0.15, startTime + 0.005);
-    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.12);
+  gain.gain.setValueAtTime(0, startTime);
+  gain.gain.linearRampToValueAtTime(0.15, startTime + 0.005);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.12);
 
-    osc.connect(gain);
-    gain.connect(getMasterGain());
-    osc.start(startTime);
-    osc.stop(startTime + 0.15);
-    activeNodes.push({ osc, gain });
-  });
+  osc.connect(gain);
+  gain.connect(getMasterGain());
+  osc.start(startTime);
+  osc.stop(startTime + 0.15);
+  activeNodes.push({ osc, gain });
 }
 
 export function scheduleClick(time, accent, activeNodes) {
@@ -135,13 +135,16 @@ export function scheduleClick(time, accent, activeNodes) {
 /**
  * @param {object} tabData
  * @param {{name:string, octave:number}[]} tuning
- * @param {{metronome?: boolean, octaveUp?: boolean, startIndex?: number, onNoteStart?: (index:number) => void, onEnd?: () => void}} [options]
+ * @param {{tempo?: number, timeSignature?: string, metronome?: boolean, octaveUp?: boolean, startIndex?: number, onNoteStart?: (index:number) => void, onEnd?: () => void}} [options]
  */
-export function playTab(tabData, tuning, { metronome = false, octaveUp = false, startIndex = 0, onNoteStart, onEnd } = {}) {
+export function playTab(
+  tabData,
+  tuning,
+  { tempo = 120, timeSignature = '4/4', metronome = false, octaveUp = false, startIndex = 0, onNoteStart, onEnd } = {}
+) {
   const ctx = getAudioContext();
-  const bpm = tabData.tempoEvents[0]?.bpm || 120;
-  const secondsPerBeat = 60 / bpm;
-  const { beatsPerMeasure } = parseTimeSignature(tabData.timeSignature);
+  const secondsPerBeat = 60 / tempo;
+  const { beatsPerMeasure } = parseTimeSignature(timeSignature);
   const startTime = ctx.currentTime + LOOKAHEAD_PAD;
 
   const activeNodes = [];
@@ -161,11 +164,15 @@ export function playTab(tabData, tuning, { metronome = false, octaveUp = false, 
     const first = group.items[0];
 
     if (first.type === 'note') {
+      // ゴースト(ミュート)ピッチと通常のフレット音が1つの和音に混在する場合があるため、
+      // ピッチごとに振り分けて発音する(ゴーストはグループ化されない=常にitems.length===1)
       for (let p = 0; p < first.notes.length; p++) {
-        scheduleVoice(ctx, tuning, group, p, groupStart, secondsPerBeat, activeNodes, octaveUp);
+        if (first.notes[p].ghost) {
+          scheduleGhostPitch(ctx, tuning, first.notes[p], groupStart, activeNodes, octaveUp);
+        } else {
+          scheduleVoice(ctx, tuning, group, p, groupStart, secondsPerBeat, activeNodes, octaveUp);
+        }
       }
-    } else if (first.type === 'ghost') {
-      scheduleGhost(ctx, tuning, first, groupStart, activeNodes, octaveUp);
     }
 
     if (onNoteStart) {
