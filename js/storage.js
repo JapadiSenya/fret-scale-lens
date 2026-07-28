@@ -1,7 +1,7 @@
 // localStorageへの設定の読み書き
 
 import { TUNING_PRESETS, DEFAULT_FRET_COUNT } from './tuning.js';
-import { createTabLibrary } from './tab.js';
+import { createTabLibrary, migrateTabData } from './tab.js';
 
 const STORAGE_KEY = 'fretScaleLens.settings';
 const TAB_STORAGE_KEY = 'fretScaleLens.tabLibrary';
@@ -46,7 +46,7 @@ export function loadTabLibrary() {
     if (!raw) return createTabLibrary();
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.tabs) || parsed.tabs.length === 0) return createTabLibrary();
-    return parsed;
+    return { ...parsed, tabs: parsed.tabs.map(migrateTabData) };
   } catch (e) {
     console.warn('TAB譜の読み込みに失敗しました。新規データを使用します。', e);
     return createTabLibrary();

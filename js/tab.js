@@ -42,7 +42,7 @@ export function createTabLibrary() {
 }
 
 export function createNoteEntry({ string, fret, duration, dotted = false }) {
-  return { type: 'note', string, fret, duration, dotted, articulation: null, tuplet: null };
+  return { type: 'note', notes: [{ string, fret }], duration, dotted, articulation: null, tuplet: null };
 }
 
 export function createRestEntry(duration, dotted = false) {
@@ -50,7 +50,57 @@ export function createRestEntry(duration, dotted = false) {
 }
 
 export function createGhostEntry({ string, fret, duration, dotted = false }) {
-  return { type: 'ghost', string, fret, duration, dotted, articulation: null, tuplet: null };
+  return { type: 'ghost', notes: [{ string, fret }], duration, dotted, articulation: null, tuplet: null };
+}
+
+// 旧形式(string/fretをトップレベルに持つ単音エントリ)をnotes配列形式へ変換する後方互換処理
+export function migrateEntry(entry) {
+  if (!entry) return entry;
+  if ((entry.type === 'note' || entry.type === 'ghost') && !Array.isArray(entry.notes)) {
+    const { type, string, fret, duration, dotted, articulation, tuplet } = entry;
+    return { type, notes: [{ string, fret }], duration, dotted, articulation, tuplet };
+  }
+  return entry;
+}
+
+export function migrateTabData(tabData) {
+  return { ...tabData, notes: (tabData.notes || []).map(migrateEntry) };
+}
+
+// 和音(複数弦同時押さえ)への音の追加・除去が可能なエントリかどうか
+export function canAddPitch(entry) {
+  return Boolean(entry) && (entry.type === 'note' || entry.type === 'ghost');
+}
+
+// notes配列のindex位置のエントリに(string, fret)を追加する。
+// 既に同じ弦が使われている場合、同じフレットなら除去(最低1音は残す)、異なるフレットなら何もしない
+// (1本の弦は同時に1音までのため)。単音→和音への遷移が発生した場合、そのエントリと
+// 直前のエントリからこのエントリへ向かうarticulationを無効化する(和音は連結先になれないため)
+export function addPitchToEntry(notes, index, pitch) {
+  const entry = notes[index];
+  if (!canAddPitch(entry)) return notes;
+
+  const existingIdx = entry.notes.findIndex((p) => p.string === pitch.string);
+  let nextPitches;
+  if (existingIdx === -1) {
+    nextPitches = [...entry.notes, pitch];
+  } else if (entry.notes[existingIdx].fret === pitch.fret) {
+    if (entry.notes.length === 1) return notes;
+    nextPitches = entry.notes.filter((_, pi) => pi !== existingIdx);
+  } else {
+    return notes;
+  }
+
+  const becameChord = entry.notes.length === 1 && nextPitches.length > 1;
+  return notes.map((n, i) => {
+    if (becameChord && i === index - 1 && isArticulation(n.articulation)) {
+      return { ...n, articulation: null };
+    }
+    if (i === index) {
+      return { ...n, notes: nextPitches, articulation: nextPitches.length > 1 ? null : n.articulation };
+    }
+    return n;
+  });
 }
 
 // 付点を考慮した「見た目上の」拍数(連符でない場合はこれがそのまま実際の拍数になる)
@@ -148,27 +198,37 @@ export function computeTupletGroups(notes) {
   }));
 }
 
+// タイ/ハンマリング・プリング/スライドは単音同士(notes.length === 1)の連結にのみ成立する。
+// 和音はこれらの連結先/連結元になれない
 function canLinkAsNotes(a, b) {
-  return Boolean(a) && Boolean(b) && a.type === 'note' && b.type === 'note';
+  return (
+    Boolean(a) &&
+    Boolean(b) &&
+    a.type === 'note' &&
+    b.type === 'note' &&
+    a.notes.length === 1 &&
+    b.notes.length === 1
+  );
 }
 
 export function canTie(notes, index) {
   const a = notes[index];
   const b = notes[index + 1];
-  return canLinkAsNotes(a, b) && a.string === b.string && a.fret === b.fret;
+  return canLinkAsNotes(a, b) && a.notes[0].string === b.notes[0].string && a.notes[0].fret === b.notes[0].fret;
 }
 
 export function canHammerPull(notes, index) {
   const a = notes[index];
   const b = notes[index + 1];
-  return canLinkAsNotes(a, b) && a.string === b.string && a.fret !== b.fret;
+  return canLinkAsNotes(a, b) && a.notes[0].string === b.notes[0].string && a.notes[0].fret !== b.notes[0].fret;
 }
 
 // スライドは異弦間でも成立するため、フレットではなく実際のピッチ(オープン弦音+フレット)で判定する
 function pitchAtEntry(tuning, entry) {
-  const openString = tuning?.[entry.string];
+  const pitch = entry.notes?.[0];
+  const openString = pitch && tuning?.[pitch.string];
   if (!openString) return null;
-  return toAbsoluteSemitone(openString.name, openString.octave) + entry.fret;
+  return toAbsoluteSemitone(openString.name, openString.octave) + pitch.fret;
 }
 
 export function canSlide(notes, index, tuning) {
@@ -187,7 +247,7 @@ export function toggleTieAt(notes, index) {
 
 export function toggleHammerPullAt(notes, index) {
   if (!canHammerPull(notes, index)) return notes;
-  const type = notes[index + 1].fret > notes[index].fret ? 'hammerOn' : 'pullOff';
+  const type = notes[index + 1].notes[0].fret > notes[index].notes[0].fret ? 'hammerOn' : 'pullOff';
   return notes.map((n, i) =>
     i === index ? { ...n, articulation: n.articulation === type ? null : type } : n
   );
