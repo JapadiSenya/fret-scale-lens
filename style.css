@@ -35,6 +35,8 @@
   --color-tab-duration: #5c5850;
   --color-tab-tuplet: #6a4fb0;
   --color-tab-tuplet-incomplete: #d9482b;
+  --color-tab-chord-bg: rgba(47, 111, 176, 0.08);
+  --color-tab-chord-border: rgba(47, 111, 176, 0.35);
 }
 
 * {
@@ -440,6 +442,11 @@ dialog::backdrop {
 
 .tab-col:focus-visible {
   outline: 2px solid var(--color-text);
+}
+
+.tab-col-chord {
+  background: var(--color-tab-chord-bg);
+  border: 1px solid var(--color-tab-chord-border);
 }
 
 .tab-duration-symbol {
