@@ -1,6 +1,7 @@
 // TAB譜のデータモデル定義・編集操作・Undo/Redo履歴管理
 
 import { toAbsoluteSemitone } from './notes.js';
+import { TUNING_PRESETS, DEFAULT_FRET_COUNT } from './tuning.js';
 
 export const DURATION_BEATS = {
   whole: 4,
@@ -29,47 +30,119 @@ function generateId() {
 export function createTabData(overrides = {}) {
   return {
     id: generateId(),
-    title: '曲名未設定',
-    timeSignature: '4/4',
-    tempoEvents: [{ atIndex: 0, bpm: 120 }],
+    partName: 'パート未設定',
+    tuning: TUNING_PRESETS[0].strings.map((s) => ({ ...s })),
+    fretCount: DEFAULT_FRET_COUNT,
     notes: [],
     ...overrides,
   };
 }
 
 export function createTabLibrary() {
-  return { tabs: [createTabData()] };
+  const tab = createTabData();
+  return { activeTabId: tab.id, tabs: [tab] };
 }
 
-export function createNoteEntry({ string, fret, duration, dotted = false }) {
-  return { type: 'note', notes: [{ string, fret }], duration, dotted, articulation: null, tuplet: null };
+// tabLibraryへの新規TAB追加(activeTabIdは変更しない。切り替えは呼び出し側でsetActiveTabIdを使う)
+export function addTabToLibrary(library, tabData) {
+  return { ...library, tabs: [...library.tabs, tabData] };
+}
+
+// TAB削除。最低1つのTABは維持する(残り1つの場合は何もしない)。
+// アクティブTABを削除した場合、削除位置に隣接するTABへ自動的に切り替える
+export function removeTabFromLibrary(library, tabId) {
+  if (library.tabs.length <= 1) return library;
+  const index = library.tabs.findIndex((t) => t.id === tabId);
+  if (index === -1) return library;
+
+  const tabs = library.tabs.filter((t) => t.id !== tabId);
+  const activeTabId =
+    library.activeTabId === tabId ? tabs[Math.min(index, tabs.length - 1)].id : library.activeTabId;
+  return { ...library, tabs, activeTabId };
+}
+
+export function setActiveTabId(library, tabId) {
+  if (!library.tabs.some((t) => t.id === tabId)) return library;
+  return { ...library, activeTabId: tabId };
+}
+
+// ghost: trueの場合、この弦はミュート/パーカッシブなヒット(✕表示)として扱う。
+// 和音は複数ピッチを持てるため、通常のフレット音とゴースト(ミュート弦)を1つの和音内に混在させられる
+export function createNoteEntry({ string, fret, duration, dotted = false, ghost = false }) {
+  return { type: 'note', notes: [{ string, fret, ghost }], duration, dotted, articulation: null, tuplet: null };
 }
 
 export function createRestEntry(duration, dotted = false) {
   return { type: 'rest', duration, dotted, articulation: null, tuplet: null };
 }
 
-export function createGhostEntry({ string, fret, duration, dotted = false }) {
-  return { type: 'ghost', notes: [{ string, fret }], duration, dotted, articulation: null, tuplet: null };
-}
-
-// 旧形式(string/fretをトップレベルに持つ単音エントリ)をnotes配列形式へ変換する後方互換処理
+// 旧形式(string/fretをトップレベルに持つ単音エントリ、または"ghost"をエントリ全体の型として
+// 持っていた形式)をnotes配列形式(ピッチごとにghostフラグを持つ)へ変換する後方互換処理
 export function migrateEntry(entry) {
-  if (!entry) return entry;
-  if ((entry.type === 'note' || entry.type === 'ghost') && !Array.isArray(entry.notes)) {
-    const { type, string, fret, duration, dotted, articulation, tuplet } = entry;
-    return { type, notes: [{ string, fret }], duration, dotted, articulation, tuplet };
-  }
-  return entry;
+  if (!entry || (entry.type !== 'note' && entry.type !== 'ghost')) return entry;
+
+  const wasGhostEntry = entry.type === 'ghost';
+  const pitches = Array.isArray(entry.notes) ? entry.notes : [{ string: entry.string, fret: entry.fret }];
+
+  return {
+    type: 'note',
+    notes: pitches.map((p) => ({ string: p.string, fret: p.fret, ghost: wasGhostEntry || Boolean(p.ghost) })),
+    duration: entry.duration,
+    dotted: entry.dotted,
+    articulation: entry.articulation,
+    tuplet: entry.tuplet,
+  };
 }
 
-export function migrateTabData(tabData) {
-  return { ...tabData, notes: (tabData.notes || []).map(migrateEntry) };
+// 旧形式(チューニング/フレット数を持たない、テンポ/拍子・曲名をTAB自身が持つ)からの後方互換処理。
+// tuning/fretCountが無い場合はfallback(呼び出し側が把握している旧・画面設定など)、
+// それも無ければアプリのデフォルトを採用する。旧フィールドのtempoEvents/timeSignatureは
+// (グローバル設定側での採用は呼び出し側の責務とし)ここでは単純に取り除く。
+// partNameが無くtitle(旧: 曲名)がある場合は、意味合いは変わるがテキストを失わないよう
+// そのままpartNameとして採用する
+export function migrateTabData(tabData, fallback = {}) {
+  const tuning =
+    Array.isArray(tabData.tuning) && tabData.tuning.length > 0
+      ? tabData.tuning
+      : Array.isArray(fallback.tuning) && fallback.tuning.length > 0
+        ? fallback.tuning
+        : TUNING_PRESETS[0].strings;
+  const fretCount = Number.isFinite(tabData.fretCount)
+    ? tabData.fretCount
+    : Number.isFinite(fallback.fretCount)
+      ? fallback.fretCount
+      : DEFAULT_FRET_COUNT;
+  const partName =
+    typeof tabData.partName === 'string'
+      ? tabData.partName
+      : typeof tabData.title === 'string'
+        ? tabData.title
+        : 'パート未設定';
+
+  const { tempoEvents, timeSignature, title, ...rest } = tabData;
+  return {
+    ...rest,
+    partName,
+    tuning: tuning.map((s) => ({ ...s })),
+    fretCount,
+    notes: (tabData.notes || []).map(migrateEntry),
+  };
+}
+
+// 旧形式のtabDataが持っていたテンポ/拍子を取り出す(グローバル設定への採用可否は呼び出し側が判断する)
+export function legacyTempoOf(tabData) {
+  return Array.isArray(tabData?.tempoEvents) && tabData.tempoEvents.length > 0
+    ? tabData.tempoEvents[0].bpm
+    : null;
+}
+
+export function legacyTimeSignatureOf(tabData) {
+  return typeof tabData?.timeSignature === 'string' ? tabData.timeSignature : null;
 }
 
 // 和音(複数弦同時押さえ)への音の追加・除去が可能なエントリかどうか
 export function canAddPitch(entry) {
-  return Boolean(entry) && (entry.type === 'note' || entry.type === 'ghost');
+  return Boolean(entry) && entry.type === 'note';
 }
 
 // notes配列のindex位置のエントリに(string, fret)を追加する。
@@ -101,6 +174,42 @@ export function addPitchToEntry(notes, index, pitch) {
     }
     return n;
   });
+}
+
+// 既存の複数音符を1つの和音エントリへ統合できるか。条件: 2音符以上・全てtype: "note"・
+// duration/dottedが全て同じ・連符化されていない・(結合後に)同じ弦が重複しないこと
+// (異なるフレット/長さの音符をどう1つに畳み込むべきか一意に定まらないため、揃っている場合のみ許可する)。
+// ghost(ミュート)/通常のフレット音はいずれもnotes内のピッチごとの属性なので、混在していても統合できる
+export function canMergeChord(notes, startIndex, endIndex) {
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  if (to - from < 1) return false;
+  const range = notes.slice(from, to + 1);
+  if (range.some((n) => !n || n.type !== 'note')) return false;
+
+  const first = range[0];
+  const sameShape = range.every((n) => n.duration === first.duration && n.dotted === first.dotted && !n.tuplet);
+  if (!sameShape) return false;
+
+  const strings = range.flatMap((n) => n.notes.map((p) => p.string));
+  return new Set(strings).size === strings.length;
+}
+
+// 選択範囲の音符を1つの和音エントリへ統合する(各エントリのnotesを結合し、選択範囲先頭の位置に配置する)。
+// 直前のエントリからこの位置へのarticulationは和音の連結先になれないため無効化する
+export function mergeToChord(notes, startIndex, endIndex) {
+  if (!canMergeChord(notes, startIndex, endIndex)) return notes;
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  const range = notes.slice(from, to + 1);
+
+  const mergedPitches = range.flatMap((n) => n.notes.map((p) => ({ ...p })));
+  const mergedEntry = { ...range[0], notes: mergedPitches, articulation: null };
+
+  const result = [...notes.slice(0, from), mergedEntry, ...notes.slice(to + 1)];
+  const prevIndex = from - 1;
+  if (prevIndex >= 0 && isArticulation(result[prevIndex].articulation)) {
+    result[prevIndex] = { ...result[prevIndex], articulation: null };
+  }
+  return result;
 }
 
 // 付点を考慮した「見た目上の」拍数(連符でない場合はこれがそのまま実際の拍数になる)
@@ -199,7 +308,7 @@ export function computeTupletGroups(notes) {
 }
 
 // タイ/ハンマリング・プリング/スライドは単音同士(notes.length === 1)の連結にのみ成立する。
-// 和音はこれらの連結先/連結元になれない
+// 和音・ゴースト(ミュート)音はこれらの連結先/連結元になれない
 function canLinkAsNotes(a, b) {
   return (
     Boolean(a) &&
@@ -207,7 +316,9 @@ function canLinkAsNotes(a, b) {
     a.type === 'note' &&
     b.type === 'note' &&
     a.notes.length === 1 &&
-    b.notes.length === 1
+    b.notes.length === 1 &&
+    !a.notes[0].ghost &&
+    !b.notes[0].ghost
   );
 }
 

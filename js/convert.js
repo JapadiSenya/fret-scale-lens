@@ -1,6 +1,6 @@
 // TAB JSON形式変換ツール(convert.html)の処理
 
-import { migrateTabData } from './tab.js';
+import { migrateTabData, legacyTempoOf, legacyTimeSignatureOf } from './tab.js';
 
 const fileInput = document.getElementById('convert-file-input');
 const inputTextarea = document.getElementById('convert-input-textarea');
@@ -22,11 +22,42 @@ function clearOutput() {
   convertedPayload = null;
 }
 
-// {tab, settings}形式・単体tabData形式のどちらも受け付け、notesエントリのみ新フォーマットへ変換する
-// (settingsは検証・変更せずそのまま保持する)
+function isValidTuning(value) {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((s) => s && typeof s === 'object' && typeof s.name === 'string' && Number.isInteger(s.octave))
+  );
+}
+
+// {tab, settings}形式・単体tabData形式のどちらも受け付け、以下を新フォーマットへ変換する:
+//   - notesエントリ(string/fret直持ち→notes配列形式。旧チョード非対応形式からの変換を含む)
+//   - チューニング/フレット数(旧形式ではsettings側にあった → tab側へ)
+//   - テンポ/拍子(旧形式ではtab側にあった → settings側へ)
+// 新フォーマットの入力(tabに既にtuning/fretCountがある等)に対しては何もしない(冪等)
 function convertPayload(parsed) {
   if (parsed && typeof parsed === 'object' && parsed.tab && typeof parsed.tab === 'object' && Array.isArray(parsed.tab.notes)) {
-    return { ...parsed, tab: migrateTabData(parsed.tab) };
+    const tabSource = parsed.tab;
+    const settingsSource = parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : null;
+
+    const tuningFallback = isValidTuning(settingsSource?.tuning) ? settingsSource.tuning : undefined;
+    const fretCountFallback = Number.isFinite(settingsSource?.fretCount) ? settingsSource.fretCount : undefined;
+    const tab = migrateTabData(tabSource, { tuning: tuningFallback, fretCount: fretCountFallback });
+
+    if (!settingsSource) return { tab };
+
+    const settings = { ...settingsSource };
+    delete settings.tuning;
+    delete settings.fretCount;
+    if (settings.tempo === undefined) {
+      const legacyTempo = legacyTempoOf(tabSource);
+      if (legacyTempo != null) settings.tempo = legacyTempo;
+    }
+    if (settings.timeSignature === undefined) {
+      const legacyTimeSignature = legacyTimeSignatureOf(tabSource);
+      if (legacyTimeSignature != null) settings.timeSignature = legacyTimeSignature;
+    }
+    return { tab, settings };
   }
   if (parsed && typeof parsed === 'object' && Array.isArray(parsed.notes)) {
     return migrateTabData(parsed);
@@ -35,8 +66,13 @@ function convertPayload(parsed) {
 }
 
 function fileNameFor(payload) {
-  const title = payload?.tab?.title ?? payload?.title;
-  return typeof title === 'string' && title.trim() ? `${title.trim()}.json` : 'converted.json';
+  const partName = payload?.tab?.partName;
+  const songTitle = payload?.settings?.songTitle;
+  if (typeof songTitle === 'string' && songTitle.trim() && typeof partName === 'string' && partName.trim()) {
+    return `${songTitle.trim()}-${partName.trim()}.json`;
+  }
+  if (typeof partName === 'string' && partName.trim()) return `${partName.trim()}.json`;
+  return 'converted.json';
 }
 
 function runConversion(text) {
