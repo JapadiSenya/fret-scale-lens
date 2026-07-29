@@ -850,3 +850,57 @@ dialog::backdrop {
   color: var(--color-toast-text);
   border-color: rgba(255, 255, 255, 0.4);
 }
+
+/* --- エフェクター --- */
+
+.dialog-hint {
+  margin: 0 0 12px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted, #6b6b66);
+}
+
+.effects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 340px;
+  margin-bottom: 12px;
+}
+
+.effects-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted, #6b6b66);
+}
+
+.effects-item {
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.effects-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.effects-remove {
+  margin-left: auto;
+}
+
+.effects-param {
+  display: grid;
+  grid-template-columns: 4em 1fr 3em;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.effects-param-value {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--color-text-muted, #6b6b66);
+}

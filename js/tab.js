@@ -2,6 +2,7 @@
 
 import { toAbsoluteSemitone } from './notes.js';
 import { TUNING_PRESETS, DEFAULT_FRET_COUNT } from './tuning.js';
+import { normalizeEffects } from './effects.js';
 
 export const DURATION_BEATS = {
   whole: 4,
@@ -33,6 +34,7 @@ export function createTabData(overrides = {}) {
     partName: 'パート未設定',
     tuning: TUNING_PRESETS[0].strings.map((s) => ({ ...s })),
     fretCount: DEFAULT_FRET_COUNT,
+    effects: [],
     notes: [],
     ...overrides,
   };
@@ -134,6 +136,7 @@ export function migrateTabData(tabData, fallback = {}) {
     partName,
     tuning: tuning.map((s) => ({ ...s })),
     fretCount,
+    effects: normalizeEffects(tabData.effects), // effectsを持たない旧形式は空配列になる
     notes: (tabData.notes || []).map(migrateEntry),
   };
 }

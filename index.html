@@ -138,6 +138,13 @@
       </div>
 
       <div class="control-group">
+        <label>音色</label>
+        <div class="button-group">
+          <button id="tab-effects-btn" type="button">エフェクター</button>
+        </div>
+      </div>
+
+      <div class="control-group">
         <label>表示</label>
         <div class="button-group">
           <button id="tab-color-sync-btn" type="button" aria-pressed="false">スケール配色を反映</button>
@@ -180,6 +187,19 @@
 
     <div class="dialog-actions">
       <button type="submit">閉じる</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="effects-dialog">
+  <form method="dialog" class="tuning-form">
+    <h2>エフェクター</h2>
+    <p class="dialog-hint">現在のTABにのみ適用されます(同時再生では他TABの音には影響しません)。メトロノームは対象外です。</p>
+    <div id="effects-list" class="effects-list"></div>
+    <div class="dialog-actions">
+      <select id="effects-add-select"></select>
+      <button id="effects-add-btn" type="button">追加</button>
+      <button id="effects-close-btn" type="button">閉じる</button>
     </div>
   </form>
 </dialog>
