@@ -1,5 +1,7 @@
 // Web Audio APIによる音声再生(音声ファイルは使用せずその場でシンセサイズする)
 
+import { getPluckBuffer } from './pluck.js';
+
 let audioCtx = null;
 let masterGain = null;
 let masterVolumeValue = 0.8;
@@ -34,27 +36,24 @@ export function getMasterVolume() {
   return masterVolumeValue;
 }
 
-const PEAK_GAIN = 0.4;
-const DECAY_SECONDS = 0.8;
+const PEAK_GAIN = 0.32;
 
+// 指板クリック音。TAB再生と同じKarplus-Strongの撥弦音で鳴らす(減衰は波形自体に含まれる)
 export function playFrequency(freq) {
   const ctx = getAudioContext();
   const now = ctx.currentTime;
 
-  const osc = ctx.createOscillator();
+  const source = ctx.createBufferSource();
+  source.buffer = getPluckBuffer(ctx, freq);
   const gain = ctx.createGain();
 
-  osc.type = 'triangle';
-  osc.frequency.setValueAtTime(freq, now);
-
-  // クリックノイズを避けつつ、自然な減衰エンベロープを付与する
+  // クリックノイズを避けるための短いフェードインのみを付ける
   gain.gain.setValueAtTime(0, now);
-  gain.gain.linearRampToValueAtTime(PEAK_GAIN, now + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + DECAY_SECONDS);
+  gain.gain.linearRampToValueAtTime(PEAK_GAIN, now + 0.002);
 
-  osc.connect(gain);
+  source.connect(gain);
   gain.connect(getMasterGain());
 
-  osc.start(now);
-  osc.stop(now + DECAY_SECONDS + 0.05);
+  source.start(now);
+  source.stop(now + source.buffer.duration + 0.02);
 }

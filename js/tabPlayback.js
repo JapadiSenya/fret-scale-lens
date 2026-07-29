@@ -2,6 +2,7 @@
 
 import { noteAtFret, frequencyOf } from './notes.js';
 import { getAudioContext, getMasterGain } from './audio.js';
+import { getPluckBuffer } from './pluck.js';
 import { getEntryBeats, parseTimeSignature } from './tab.js';
 
 const LOOKAHEAD_PAD = 0.05;
@@ -23,27 +24,23 @@ export function playbackStartTime(totalEntries = 0) {
   return getAudioContext().currentTime + pad;
 }
 
-const ATTACK_SECONDS = 0.01;
-const INITIAL_DECAY_SECONDS = 0.08;
+const ATTACK_SECONDS = 0.002;
 const RELEASE_SECONDS = 0.12;
-const VOICE_PEAK_GAIN = 0.4;
-const VOICE_SUSTAIN_RATIO = 0.45;
+const VOICE_PEAK_GAIN = 0.32;
+const GHOST_PEAK_GAIN = 0.22;
 
-// 音符長いっぱいまで音量を保持し、末尾だけ短くリリースするエンベロープ(アタック→減衰→サステイン→リリース)を組む
+// 音の減衰はKarplus-Strongの波形自体に含まれているため、ここでは発音時のクリック防止と
+// 音符の終わりでの消音(弦を押さえ直す・ミュートする動作に相当)だけを担う。
+// 撥弦楽器は弾いた瞬間から減衰し続けるので、サステインの平坦部は設けない
 function scheduleEnvelope(gain, startTime, duration, peak = VOICE_PEAK_GAIN) {
-  const sustainLevel = Math.max(peak * VOICE_SUSTAIN_RATIO, 0.0001);
   const attackEnd = startTime + Math.min(ATTACK_SECONDS, duration);
-  const decayEnd = Math.min(attackEnd + INITIAL_DECAY_SECONDS, startTime + duration);
   const noteEnd = startTime + duration;
-  const releaseStart = Math.max(decayEnd, noteEnd - RELEASE_SECONDS);
+  const releaseStart = Math.max(attackEnd, noteEnd - RELEASE_SECONDS);
   const releaseEnd = Math.max(noteEnd, releaseStart + 0.01);
 
   gain.gain.setValueAtTime(0, startTime);
   gain.gain.linearRampToValueAtTime(peak, attackEnd);
-  gain.gain.exponentialRampToValueAtTime(sustainLevel, decayEnd);
-  if (releaseStart > decayEnd) {
-    gain.gain.setValueAtTime(sustainLevel, releaseStart);
-  }
+  gain.gain.setValueAtTime(peak, releaseStart);
   gain.gain.exponentialRampToValueAtTime(0.0001, releaseEnd);
 
   return releaseEnd;
@@ -106,25 +103,28 @@ function groupEntries(notes) {
 // 対応するピッチを追いかけて1本のOscillatorNodeを継続させる(単音・非タイの和音は常にitems.length===1)。
 // 弦をまたぐスライドでは連結先の弦番号が変わるため、pitchOnStringが単音のフォールバックを返す
 function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat, activeNodes, octaveUp) {
-  const osc = ctx.createOscillator();
+  // 波形は撥弦した瞬間の音高で生成し、以降のピッチ変化(スライド・ハンマリング/プリング)は
+  // 再生速度で表現する。存在しない弦を参照している音は周波数を決められないため鳴らさない
+  const baseFreq = frequencyForPitch(tuning, pitchOnString(group.items[0], stringNum), octaveUp);
+  if (baseFreq == null) return;
+
+  const source = ctx.createBufferSource();
+  source.buffer = getPluckBuffer(ctx, baseFreq);
   const gain = ctx.createGain();
-  osc.type = 'triangle';
 
   let t = groupStart;
   let totalDuration = 0;
   group.items.forEach((item, i) => {
     const dur = getEntryBeats(item) * secondsPerBeat;
-    // 存在しない弦を参照している音(弦数を減らした後のデータ等)は周波数を決められないため、
-    // 直前の周波数を保ったまま鳴らす(スケジューリング全体を失敗させない)
     const freq = frequencyForPitch(tuning, pitchOnString(item, stringNum), octaveUp);
     const prevItem = group.items[i - 1];
     if (freq != null && (!prevItem || prevItem.articulation !== 'slide')) {
-      osc.frequency.setValueAtTime(freq, t);
+      source.playbackRate.setValueAtTime(freq / baseFreq, t);
     }
     const nextItem = group.items[i + 1];
     if (item.articulation === 'slide' && nextItem) {
       const nextFreq = frequencyForPitch(tuning, pitchOnString(nextItem, stringNum), octaveUp);
-      if (nextFreq != null) osc.frequency.linearRampToValueAtTime(nextFreq, t + dur);
+      if (nextFreq != null) source.playbackRate.linearRampToValueAtTime(nextFreq / baseFreq, t + dur);
     }
     t += dur;
     totalDuration += dur;
@@ -132,31 +132,32 @@ function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat
 
   const releaseEnd = scheduleEnvelope(gain, groupStart, totalDuration);
 
-  osc.connect(gain);
+  source.connect(gain);
   gain.connect(getMasterGain());
-  osc.start(groupStart);
-  osc.stop(releaseEnd + 0.02);
-  activeNodes.push({ osc, gain });
+  source.start(groupStart);
+  source.stop(releaseEnd + 0.02);
+  activeNodes.push({ osc: source, gain });
 }
 
-// ゴースト(ミュート)ピッチ1音分を、通知された長さに関わらず短いパーカッシブな減衰で発音する
+// ゴースト(ミュート)ピッチ1音分を、通知された長さに関わらず短いパーカッシブな減衰で発音する。
+// 減衰は波形側(ミュート用に減衰時間を極端に短くしたもの)に含まれている
 function scheduleGhostPitch(ctx, tuning, pitch, startTime, activeNodes, octaveUp) {
   const freq = frequencyForPitch(tuning, pitch, octaveUp);
   if (freq == null) return; // 存在しない弦を参照している音は鳴らさない
-  const osc = ctx.createOscillator();
+
+  const source = ctx.createBufferSource();
+  source.buffer = getPluckBuffer(ctx, freq, true);
   const gain = ctx.createGain();
-  osc.type = 'triangle';
-  osc.frequency.setValueAtTime(freq, startTime);
+  const endTime = startTime + source.buffer.duration;
 
   gain.gain.setValueAtTime(0, startTime);
-  gain.gain.linearRampToValueAtTime(0.15, startTime + 0.005);
-  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.12);
+  gain.gain.linearRampToValueAtTime(GHOST_PEAK_GAIN, startTime + ATTACK_SECONDS);
 
-  osc.connect(gain);
+  source.connect(gain);
   gain.connect(getMasterGain());
-  osc.start(startTime);
-  osc.stop(startTime + 0.15);
-  activeNodes.push({ osc, gain });
+  source.start(startTime);
+  source.stop(endTime + 0.02);
+  activeNodes.push({ osc: source, gain });
 }
 
 export function scheduleClick(time, accent, activeNodes) {
@@ -175,6 +176,26 @@ export function scheduleClick(time, accent, activeNodes) {
   osc.start(time);
   osc.stop(time + 0.08);
   activeNodes?.push({ osc, gain });
+}
+
+/**
+ * 再生に使う音高の波形を先に生成しておく。音高ごとの生成は初回だけコストがかかるため、
+ * 再生開始時刻を決める前に済ませておかないと、予約し終える前に開始時刻を過ぎて
+ * 冒頭の音が詰まって鳴ってしまう
+ * @param {object} tabData
+ * @param {{name:string, octave:number}[]} tuning
+ * @param {{octaveUp?: boolean, startIndex?: number}} [options]
+ */
+export function warmUpVoices(tabData, tuning, { octaveUp = false, startIndex = 0 } = {}) {
+  const ctx = getAudioContext();
+  for (let i = startIndex; i < tabData.notes.length; i++) {
+    const entry = tabData.notes[i];
+    if (entry.type !== 'note') continue;
+    entry.notes.forEach((pitch) => {
+      const freq = frequencyForPitch(tuning, pitch, octaveUp);
+      if (freq != null) getPluckBuffer(ctx, freq, Boolean(pitch.ghost));
+    });
+  }
 }
 
 /**
