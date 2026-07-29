@@ -33,15 +33,21 @@ function scheduleEnvelope(gain, startTime, duration, peak = VOICE_PEAK_GAIN) {
 }
 
 function frequencyForPitch(tuning, pitch, octaveUp) {
-  const openString = tuning[pitch.string];
+  const openString = pitch ? tuning[pitch.string] : null;
   if (!openString) return null;
   const note = noteAtFret(openString.name, openString.octave, pitch.fret);
   const freq = frequencyOf(note.name, note.octave);
   return octaveUp ? freq * 2 : freq;
 }
 
+// 1本のOscillatorNodeが追いかけるピッチを、グループ内の各エントリから取り出す。
+// タイで連結された和音は配列の並び順ではなく弦番号で対応を取る必要がある一方、
+// スライドは弦をまたいで連結できる(単音同士のみ)ため、弦番号が一致しない場合は
+// そのエントリの唯一のピッチをそのまま使う
 function pitchOnString(entry, stringNum) {
-  return entry.notes.find((p) => p.string === stringNum);
+  const onString = entry.notes.find((p) => p.string === stringNum);
+  if (onString) return onString;
+  return entry.notes.length === 1 ? entry.notes[0] : undefined;
 }
 
 // 同じ(弦, フレット, ゴースト有無)の組み合わせを持つ和音同士か(tab.jsのcanTie判定と同じ条件を
@@ -80,7 +86,8 @@ function groupEntries(notes) {
 }
 
 // stringNum: 発音する弦番号。タイで連結された和音グループは、配列の並び順ではなく弦番号で
-// 対応するピッチを追いかけて1本のOscillatorNodeを継続させる(単音・非タイの和音は常にitems.length===1)
+// 対応するピッチを追いかけて1本のOscillatorNodeを継続させる(単音・非タイの和音は常にitems.length===1)。
+// 弦をまたぐスライドでは連結先の弦番号が変わるため、pitchOnStringが単音のフォールバックを返す
 function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat, activeNodes, octaveUp) {
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
@@ -90,15 +97,17 @@ function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat
   let totalDuration = 0;
   group.items.forEach((item, i) => {
     const dur = getEntryBeats(item) * secondsPerBeat;
+    // 存在しない弦を参照している音(弦数を減らした後のデータ等)は周波数を決められないため、
+    // 直前の周波数を保ったまま鳴らす(スケジューリング全体を失敗させない)
     const freq = frequencyForPitch(tuning, pitchOnString(item, stringNum), octaveUp);
     const prevItem = group.items[i - 1];
-    if (!prevItem || prevItem.articulation !== 'slide') {
+    if (freq != null && (!prevItem || prevItem.articulation !== 'slide')) {
       osc.frequency.setValueAtTime(freq, t);
     }
     const nextItem = group.items[i + 1];
     if (item.articulation === 'slide' && nextItem) {
       const nextFreq = frequencyForPitch(tuning, pitchOnString(nextItem, stringNum), octaveUp);
-      osc.frequency.linearRampToValueAtTime(nextFreq, t + dur);
+      if (nextFreq != null) osc.frequency.linearRampToValueAtTime(nextFreq, t + dur);
     }
     t += dur;
     totalDuration += dur;
@@ -116,6 +125,7 @@ function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat
 // ゴースト(ミュート)ピッチ1音分を、通知された長さに関わらず短いパーカッシブな減衰で発音する
 function scheduleGhostPitch(ctx, tuning, pitch, startTime, activeNodes, octaveUp) {
   const freq = frequencyForPitch(tuning, pitch, octaveUp);
+  if (freq == null) return; // 存在しない弦を参照している音は鳴らさない
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = 'triangle';
