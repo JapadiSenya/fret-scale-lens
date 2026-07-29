@@ -11,7 +11,18 @@ export function getAudioContext() {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     masterGain = audioCtx.createGain();
     masterGain.gain.value = masterVolumeValue;
-    masterGain.connect(audioCtx.destination);
+
+    // 和音・同時再生・速いパッセージで発音が重なると合計振幅が振り切れ、破裂したような
+    // 歪みになる。出力の最終段でピークを抑えて、音量設定に関わらずこれを防ぐ
+    const limiter = audioCtx.createDynamicsCompressor();
+    limiter.threshold.value = -8;
+    limiter.knee.value = 6;
+    limiter.ratio.value = 12;
+    limiter.attack.value = 0.001;
+    limiter.release.value = 0.2;
+
+    masterGain.connect(limiter);
+    limiter.connect(audioCtx.destination);
   }
   if (audioCtx.state === 'suspended') {
     audioCtx.resume();
