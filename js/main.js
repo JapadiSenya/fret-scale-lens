@@ -35,6 +35,8 @@ import {
   canHammerPull,
   canSlide,
   canTuplet,
+  canTranspose,
+  transposeRange,
   canAddPitch,
   addPitchToEntry,
   canMergeChord,
@@ -119,6 +121,8 @@ const tabHammerPullBtn = document.getElementById('tab-hammer-pull-btn');
 const tabSlideBtn = document.getElementById('tab-slide-btn');
 const tabTupletBtn = document.getElementById('tab-tuplet-btn');
 const tabDeleteBtn = document.getElementById('tab-delete-btn');
+const tabTransposeUpBtn = document.getElementById('tab-transpose-up-btn');
+const tabTransposeDownBtn = document.getElementById('tab-transpose-down-btn');
 const tabUndoBtn = document.getElementById('tab-undo-btn');
 const tabRedoBtn = document.getElementById('tab-redo-btn');
 const tabCopyBtn = document.getElementById('tab-copy-btn');
@@ -658,6 +662,28 @@ function finishTrack(session, track) {
   }
 }
 
+// 選択範囲の音符を半音(=1フレット)単位で上げ下げする。範囲内のピッチが1つでも
+// フレット範囲を外れる場合は、和音の構成が崩れないよう操作全体を行わない
+function canTransposeSelection(delta) {
+  if (!tabSelection) return false;
+  return canTranspose(tabData.notes, tabSelection.start, tabSelection.end, delta, tabData.fretCount);
+}
+
+function transposeSelection(delta) {
+  if (!canTransposeSelection(delta)) return;
+  commitTab({
+    notes: transposeRange(
+      tabData.notes,
+      tabSelection.start,
+      tabSelection.end,
+      delta,
+      tabData.fretCount,
+      tabData.tuning
+    ),
+  });
+  renderTabView();
+}
+
 function syncTabButtons() {
   const hasSelection = Boolean(tabSelection);
   const isPair = hasSelection && Math.abs(tabSelection.end - tabSelection.start) === 1;
@@ -665,6 +691,8 @@ function syncTabButtons() {
 
   tabDeleteBtn.disabled = !hasSelection;
   tabCopyBtn.disabled = !hasSelection;
+  tabTransposeUpBtn.disabled = !canTransposeSelection(1);
+  tabTransposeDownBtn.disabled = !canTransposeSelection(-1);
   tabPasteBtn.disabled = !tabClipboard;
   tabUndoBtn.disabled = tabHistory.past.length === 0;
   tabRedoBtn.disabled = tabHistory.future.length === 0;
@@ -1015,6 +1043,9 @@ tabTupletBtn.addEventListener('click', () => {
   commitTab({ notes: toggleTupletAt(tabData.notes, tabSelection.start, tabSelection.end) });
   renderTabView();
 });
+
+tabTransposeUpBtn.addEventListener('click', () => transposeSelection(1));
+tabTransposeDownBtn.addEventListener('click', () => transposeSelection(-1));
 
 tabDeleteBtn.addEventListener('click', () => {
   if (!tabSelection) return;

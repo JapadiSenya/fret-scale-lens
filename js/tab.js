@@ -399,6 +399,33 @@ export function canSlide(notes, index, tuning) {
   return pitchA != null && pitchB != null && pitchA !== pitchB;
 }
 
+// 選択範囲の全ピッチのフレットをdelta分だけ動かせるか。1つでもフレット範囲(0〜fretCount)を
+// 外れるなら不可とする(一部のピッチだけ動かすと和音の構成が崩れるため、範囲全体で可否を判定する)
+export function canTranspose(notes, startIndex, endIndex, delta, fretCount) {
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  const range = notes.slice(from, to + 1);
+  if (range.length === 0 || range.some((n) => !n)) return false;
+  const pitches = range.filter((n) => n.type === 'note').flatMap((n) => n.notes);
+  if (pitches.length === 0) return false; // 全て休符の選択には適用できない
+  return pitches.every((p) => p.fret + delta >= 0 && p.fret + delta <= fretCount);
+}
+
+// 選択範囲の音符のフレットをdelta分だけ動かす(1フレット=半音)。和音は全ピッチを同じだけ
+// 動かしてvoicingを保ったまま平行移動する。休符はそのまま残す
+export function transposeRange(notes, startIndex, endIndex, delta, fretCount, tuning) {
+  if (!canTranspose(notes, startIndex, endIndex, delta, fretCount)) return notes;
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+
+  const moved = notes.map((n, i) =>
+    i >= from && i <= to && n.type === 'note'
+      ? { ...n, notes: n.notes.map((p) => ({ ...p, fret: p.fret + delta })) }
+      : n
+  );
+  // 範囲の直前のエントリから範囲先頭への連結と、範囲内の各連結は、ピッチが変わることで
+  // 成立しなくなることがあるため再評価する(範囲全体を同じだけ動かした場合は維持される)
+  return moved.map((n, i) => (i >= from - 1 && i <= to ? reevaluateArticulation(moved, i, tuning) : n));
+}
+
 export function toggleTieAt(notes, index) {
   if (!canTie(notes, index)) return notes;
   return notes.map((n, i) => (i === index ? { ...n, articulation: n.articulation === 'tie' ? null : 'tie' } : n));
