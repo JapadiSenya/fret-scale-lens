@@ -147,12 +147,19 @@ let selectedDuration = 'quarter';
 let dottedInput = false;
 let pendingInputMode = 'note'; // 'note' | 'ghost'
 let chordInputMode = false; // 有効時、単一選択中のエントリへ指板クリックでピッチを追加する
-let playbackHandle = null;
+// 再生セッション。同時再生では複数トラック(アクティブTAB + 同時再生に選択された他TAB)が
+// 並行して鳴るため、1セッションとして全トラックのハンドルをまとめて保持し、
+// 「全トラックが終わって初めて再生終了」とする。
+// { tracks: [{ handle, finished, isActive }], pending }
+// onNoteStart/onEndのコールバックは、発行時点のセッションオブジェクトが現在も有効な場合のみ処理する
+// (停止操作とタイマー発火がほぼ同時に起きた場合などに、既に停止済み・別セッションに切り替わった
+// 後の古いコールバックがplayingIndex等の状態を誤って書き換えるのを防ぐ)
+let playbackSession = null;
 let playingIndex = null;
-// 再生セッションごとに増分するトークン。onNoteStart/onEndのコールバックは、発行時点のセッションが
-// 現在も有効な場合のみ処理する(停止操作とタイマー発火がほぼ同時に起きた場合などに、既に停止済み・
-// 別セッションに切り替わった後の古いコールバックがplayingIndex等の状態を誤って書き換えるのを防ぐ)
-let playbackSessionId = 0;
+
+function isTabPlaying() {
+  return playbackSession !== null;
+}
 
 const DISPLAY_MODE_LABELS = {
   scale: 'スケール構成音',
@@ -318,7 +325,7 @@ function renderStringList() {
 // --- マルチTAB管理 ---
 
 function renderTabBar() {
-  const isPlaying = Boolean(playbackHandle);
+  const isPlaying = isTabPlaying();
   tabBarListEl.replaceChildren(
     ...tabLibrary.tabs.map((t) => {
       const item = document.createElement('div');
@@ -371,7 +378,7 @@ function renderSimulPlayList() {
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.checked = simultaneousTabIds.has(t.id);
-      checkbox.disabled = Boolean(playbackHandle);
+      checkbox.disabled = isTabPlaying();
       checkbox.addEventListener('change', () => {
         if (checkbox.checked) simultaneousTabIds.add(t.id);
         else simultaneousTabIds.delete(t.id);
@@ -390,7 +397,7 @@ function renderSimulPlayList() {
 // アクティブTABを切り替える。切り替え元のUndo履歴・選択範囲はtabSessionsへ退避し、
 // 切り替え先の状態(あれば)を復元する
 function switchToTab(tabId) {
-  if (playbackHandle || tabId === tabLibrary.activeTabId) return;
+  if (isTabPlaying() || tabId === tabLibrary.activeTabId) return;
 
   tabSessions.set(tabData.id, { history: tabHistory, selection: tabSelection });
 
@@ -411,7 +418,7 @@ function switchToTab(tabId) {
 }
 
 function deleteTab(tabId) {
-  if (playbackHandle) return;
+  if (isTabPlaying()) return;
   const wasActive = tabId === tabLibrary.activeTabId;
 
   tabLibrary = removeTabFromLibrary(tabLibrary, tabId);
@@ -536,13 +543,102 @@ function handleTabColumnClick(index, event) {
   renderTabView();
 }
 
+// 再生中の全トラックを停止し、UIを停止状態へ戻す
 function stopTabPlayback() {
-  playbackSessionId++; // このセッションの古いコールバックを以後すべて無効化する
-  playbackHandle?.stop();
-  playbackHandle = null;
+  const session = playbackSession;
+  playbackSession = null; // 以後、このセッションのコールバックはすべて無効になる
+  // 1トラックの停止で例外が起きても残りのトラックは必ず止める。止め損ねた音が残ったまま
+  // 停止状態のUIに戻ると、次に再生したときに前回の音と重なって鳴ってしまうため
+  session?.tracks.forEach((track) => {
+    try {
+      track.handle?.stop();
+    } catch (error) {
+      console.error(error);
+    }
+  });
   playingIndex = null;
   tabPlayBtn.textContent = '再生';
   render();
+}
+
+function startTabPlayback() {
+  // 直前のセッションが何らかの理由で残っている場合に備え、必ず止めてから始める(多重再生の防止)
+  if (playbackSession) stopTabPlayback();
+
+  // 同時再生の対象はあくまで「他TAB」。アクティブTABが混ざると二重に発音されるため明示的に除外する
+  const others = tabLibrary.tabs.filter((t) => t.id !== tabData.id && simultaneousTabIds.has(t.id));
+  if (tabData.notes.length === 0 && others.length === 0) return;
+
+  // アクティブTABは選択位置(複数選択時は選択範囲の先頭)からそのまま再生する。
+  // 他TABはリズムが異なりインデックスの対応が取れないため、アクティブTABの開始位置を
+  // 拍数に変換し、その拍数に対応する自TAB内の位置から再生することで同期を保つ
+  const startIndex = tabSelection ? Math.min(tabSelection.start, tabSelection.end) : 0;
+  const targetBeats = beatsBeforeIndex(tabData.notes, startIndex);
+
+  const session = { tracks: [], pending: 0 };
+  // スケジューリング途中で例外が起きても、それまでに鳴り始めたトラックを停止できるよう
+  // 先にセッションを保持しておく(停止手段を失った音が残ると次の再生と重なってしまう)
+  playbackSession = session;
+
+  function addTrack(tab, isActive, options) {
+    const track = { handle: null, finished: false, isActive };
+    session.tracks.push(track);
+    session.pending += 1;
+    track.handle = playTab(tab, tab.tuning, {
+      tempo: state.tempo,
+      timeSignature: state.timeSignature,
+      octaveUp: state.tabOctaveUp,
+      ...options,
+      onEnd: () => finishTrack(session, track),
+    });
+  }
+
+  try {
+    addTrack(tabData, true, {
+      metronome: state.tabMetronome,
+      startIndex,
+      onNoteStart: (index) => {
+        if (session !== playbackSession) return;
+        playingIndex = index;
+        renderTabView();
+      },
+    });
+
+    others.forEach((otherTab) => {
+      const otherStartIndex = indexAtBeats(otherTab.notes, targetBeats);
+      if (otherStartIndex >= otherTab.notes.length) return; // この時点で既に演奏が終わっているTABは再生しない
+      addTrack(otherTab, false, { metronome: false, startIndex: otherStartIndex });
+    });
+  } catch (error) {
+    console.error(error);
+    stopTabPlayback(); // 中途半端に鳴り始めた音を残さない
+    showToast('再生を開始できませんでした。');
+    return;
+  }
+
+  tabPlayBtn.textContent = '停止';
+  renderTabBar();
+  renderSimulPlayList();
+  syncTabJsonView();
+}
+
+// 1トラック分の再生終了。同時再生では、アクティブTABが先に終わっても他TABが鳴り続けている間は
+// 再生中(停止ボタン)のままにし、全トラックが終わって初めて停止状態へ戻す
+function finishTrack(session, track) {
+  if (session !== playbackSession || track.finished) return;
+  track.finished = true;
+  session.pending -= 1;
+
+  if (session.pending <= 0) {
+    stopTabPlayback();
+    return;
+  }
+
+  // アクティブTAB自身の演奏だけが終わった場合は、再生位置ハイライトを消して他TABの再生を続ける
+  if (track.isActive) {
+    playingIndex = null;
+    renderTabView();
+  }
 }
 
 function syncTabButtons() {
@@ -586,7 +682,7 @@ function syncTabButtons() {
     btn.classList.toggle('active', btn.dataset.duration === selectedDuration);
   });
 
-  tabPlayBtn.disabled = tabData.notes.length === 0 && simultaneousTabIds.size === 0 && !playbackHandle;
+  tabPlayBtn.disabled = tabData.notes.length === 0 && simultaneousTabIds.size === 0 && !isTabPlaying();
 }
 
 function renderTabView() {
@@ -724,7 +820,7 @@ function scrollTabJsonToOffset(text, offset) {
 }
 
 function syncTabJsonView() {
-  tabJsonTextarea.disabled = Boolean(playbackHandle);
+  tabJsonTextarea.disabled = isTabPlaying();
   if (!tabJsonDetails.open) return;
   if (document.activeElement === tabJsonTextarea) return; // 編集中は上書きしない(カーソル位置を保持)
 
@@ -766,7 +862,7 @@ function isValidImportedTuning(value) {
 }
 
 function applyTabJsonText(rawText) {
-  if (playbackHandle) return;
+  if (isTabPlaying()) return;
 
   let parsed;
   try {
@@ -964,72 +1060,11 @@ tabColorSyncBtn.addEventListener('click', () => {
 });
 
 tabPlayBtn.addEventListener('click', () => {
-  if (playbackHandle) {
+  if (isTabPlaying()) {
     stopTabPlayback();
     return;
   }
-
-  const others = tabLibrary.tabs.filter((t) => simultaneousTabIds.has(t.id));
-  if (tabData.notes.length === 0 && others.length === 0) return;
-
-  // アクティブTABは選択位置(複数選択時は選択範囲の先頭)からそのまま再生する。
-  // 他TABはリズムが異なりインデックスの対応が取れないため、アクティブTABの開始位置を
-  // 拍数に変換し、その拍数に対応する自TAB内の位置から再生することで同期を保つ
-  const startIndex = tabSelection ? Math.min(tabSelection.start, tabSelection.end) : 0;
-  const targetBeats = beatsBeforeIndex(tabData.notes, startIndex);
-
-  const sessionId = ++playbackSessionId;
-  const handles = [];
-  let remaining = 0;
-
-  function handleOneEnd() {
-    if (sessionId !== playbackSessionId) return; // 既に停止/別セッションへ切り替わった後の古い通知は無視する
-    remaining -= 1;
-    if (remaining <= 0) stopTabPlayback();
-  }
-
-  remaining += 1;
-  handles.push(
-    playTab(tabData, tabData.tuning, {
-      tempo: state.tempo,
-      timeSignature: state.timeSignature,
-      metronome: state.tabMetronome,
-      octaveUp: state.tabOctaveUp,
-      startIndex,
-      onNoteStart: (index) => {
-        if (sessionId !== playbackSessionId) return;
-        playingIndex = index;
-        renderTabView();
-      },
-      onEnd: handleOneEnd,
-    })
-  );
-
-  others.forEach((otherTab) => {
-    const otherStartIndex = indexAtBeats(otherTab.notes, targetBeats);
-    if (otherStartIndex >= otherTab.notes.length) return; // この時点で既に演奏が終わっているTABは再生しない
-    remaining += 1;
-    handles.push(
-      playTab(otherTab, otherTab.tuning, {
-        tempo: state.tempo,
-        timeSignature: state.timeSignature,
-        metronome: false,
-        octaveUp: state.tabOctaveUp,
-        startIndex: otherStartIndex,
-        onEnd: handleOneEnd,
-      })
-    );
-  });
-
-  playbackHandle = {
-    stop() {
-      handles.forEach((h) => h.stop());
-    },
-  };
-  tabPlayBtn.textContent = '停止';
-  renderTabBar();
-  renderSimulPlayList();
-  syncTabJsonView();
+  startTabPlayback();
 });
 
 // 画面上部の設定(セクション5でlocalStorageに保存している項目)のスナップショット
@@ -1279,7 +1314,7 @@ function debounce(fn, waitMs) {
 }
 
 tabAddBtn.addEventListener('click', () => {
-  if (playbackHandle) return;
+  if (isTabPlaying()) return;
   newTabPartNameInput.value = '';
   newTabPresetSelect.value = TUNING_PRESETS[0].id;
   newTabDialog.showModal();
