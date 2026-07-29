@@ -63,6 +63,7 @@
   ├ tuning.js        … 弦数・チューニング状態管理、プリセット定義
   ├ storage.js       … localStorage読み書き(設定・TAB譜ライブラリ)
   ├ audio.js         … Web Audio APIによる音再生・マスター音量
+  ├ pluck.js         … Karplus-Strong法による撥弦音の合成・音高ごとの波形キャッシュ
   ├ render.js        … フレットボードSVG描画
   ├ tab.js           … TAB譜データモデル・編集操作・Undo/Redo履歴
   ├ tabRender.js     … TAB譜表示エリアのDOM描画

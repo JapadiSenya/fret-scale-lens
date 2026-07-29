@@ -62,7 +62,7 @@ import {
   legacyTimeSignatureOf,
 } from './tab.js';
 import { renderTab, setPlayingColumn, getColumnElement } from './tabRender.js';
-import { playTab, playbackStartTime } from './tabPlayback.js';
+import { playTab, playbackStartTime, warmUpVoices } from './tabPlayback.js';
 
 const OCTAVE_OPTIONS = [0, 1, 2, 3, 4, 5, 6];
 const CUSTOM_PRESET_VALUE = 'custom';
@@ -592,6 +592,11 @@ function startTabPlayback() {
     if (otherStartIndex >= otherTab.notes.length) return; // この時点で既に演奏が終わっているTABは再生しない
     plan.push({ tab: otherTab, isActive: false, from: otherStartIndex });
   });
+
+  // 音高ごとの波形生成は初回だけコストがかかるため、開始時刻を決める前に済ませておく
+  plan.forEach(({ tab, from }) =>
+    warmUpVoices(tab, tab.tuning, { octaveUp: state.tabOctaveUp, startIndex: from })
+  );
 
   // 全トラックで開始時刻を共有する。トラックごとに再生開始時にその場の時刻を読むと、
   // 先に予約したトラックのスケジューリングに要した時間だけ後続が遅れて鳴り出す
