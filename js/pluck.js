@@ -24,10 +24,10 @@ function stringCharacter(freq) {
   const t = clamp((Math.log2(freq) - Math.log2(41)) / (Math.log2(660) - Math.log2(41)), 0, 1);
   return {
     t60: lerp(5.5, 1.7, t), // 60dB減衰するまでの時間(秒)
-    pluckPosition: lerp(0.3, 0.22, t), // 弦のどこを弾くか(0〜1)。端に近いほど硬い音になる
-    noiseAmount: lerp(0.07, 0.16, t), // ピックが弦に当たる瞬間のノイズの量
+    pluckPosition: lerp(0.33, 0.22, t), // 弦のどこを弾くか(0〜1)。端に近いほど硬い音になる
+    noiseAmount: lerp(0.05, 0.16, t), // ピックが弦に当たる瞬間のノイズの量
     loopMix: lerp(0.62, 0.5, t), // ループフィルタの重み(大きいほど高い倍音が速く減衰する)
-    toneCutoff: lerp(2000, 4200, t), // ボディ/ピックアップによる高域の丸まりの近似(Hz)
+    toneCutoff: lerp(1650, 4200, t), // ボディ/ピックアップによる高域の丸まりの近似(Hz)
   };
 }
 
