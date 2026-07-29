@@ -29,18 +29,19 @@ const RELEASE_SECONDS = 0.12;
 const VOICE_PEAK_GAIN = 0.32;
 const GHOST_PEAK_GAIN = 0.22;
 
-// 音の減衰はKarplus-Strongの波形自体に含まれているため、ここでは発音時のクリック防止と
-// 音符の終わりでの消音(弦を押さえ直す・ミュートする動作に相当)だけを担う。
-// 撥弦楽器は弾いた瞬間から減衰し続けるので、サステインの平坦部は設けない
+// 音の減衰はKarplus-Strongの波形自体に含まれているため、ここでは発音時のクリック防止と、
+// 音符の終わりの余韻だけを担う。撥弦楽器は弾いた瞬間から減衰し続けるのでサステインの平坦部は設けない。
+// 余韻は音符の長さの内側を削るのではなく、音符の終わりから先へ伸ばす。内側を削ると、8分・16分の
+// ような短い音符では「アタックだけ鳴らして即座に消える」形になり、硬い音が連続してしまうため。
+// 余韻の長さは音符の長さで頭打ちにして、速いパッセージが濁らないようにする
 function scheduleEnvelope(gain, startTime, duration, peak = VOICE_PEAK_GAIN) {
   const attackEnd = startTime + Math.min(ATTACK_SECONDS, duration);
   const noteEnd = startTime + duration;
-  const releaseStart = Math.max(attackEnd, noteEnd - RELEASE_SECONDS);
-  const releaseEnd = Math.max(noteEnd, releaseStart + 0.01);
+  const releaseEnd = noteEnd + Math.max(Math.min(RELEASE_SECONDS, duration), 0.01);
 
   gain.gain.setValueAtTime(0, startTime);
   gain.gain.linearRampToValueAtTime(peak, attackEnd);
-  gain.gain.setValueAtTime(peak, releaseStart);
+  gain.gain.setValueAtTime(peak, noteEnd);
   gain.gain.exponentialRampToValueAtTime(0.0001, releaseEnd);
 
   return releaseEnd;

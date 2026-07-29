@@ -24,13 +24,21 @@ function stringCharacter(freq) {
   const t = clamp((Math.log2(freq) - Math.log2(41)) / (Math.log2(660) - Math.log2(41)), 0, 1);
   return {
     t60: lerp(5.5, 1.7, t), // 60dB減衰するまでの時間(秒)
-    pickBrightness: lerp(0.3, 0.8, t), // 撥弦ノイズの明るさ(1に近いほど硬い音)
-    loopMix: lerp(0.56, 0.46, t), // ループフィルタの重み(大きいほど高い倍音が速く減衰する)
+    pluckPosition: lerp(0.3, 0.22, t), // 弦のどこを弾くか(0〜1)。端に近いほど硬い音になる
+    noiseAmount: lerp(0.07, 0.16, t), // ピックが弦に当たる瞬間のノイズの量
+    loopMix: lerp(0.62, 0.5, t), // ループフィルタの重み(大きいほど高い倍音が速く減衰する)
+    toneCutoff: lerp(2000, 4200, t), // ボディ/ピックアップによる高域の丸まりの近似(Hz)
   };
 }
 
 // ミュート(ゴースト)ピッチ。ほぼ減衰音だけが残る短いパーカッシブな音になる
-const MUTED_CHARACTER = { t60: 0.12, pickBrightness: 0.85, loopMix: 0.7 };
+const MUTED_CHARACTER = {
+  t60: 0.12,
+  pluckPosition: 0.18,
+  noiseAmount: 0.5,
+  loopMix: 0.7,
+  toneCutoff: 3000,
+};
 
 /**
  * Karplus-Strongで1音分の波形を生成する。
@@ -39,7 +47,7 @@ const MUTED_CHARACTER = { t60: 0.12, pickBrightness: 0.85, loopMix: 0.7 };
  * @param {{t60:number, pickBrightness:number, loopMix:number}} character
  * @returns {Float32Array}
  */
-function renderPluckWave(sampleRate, freq, { t60, pickBrightness, loopMix }) {
+function renderPluckWave(sampleRate, freq, { t60, pluckPosition, noiseAmount, loopMix, toneCutoff }) {
   const outLength = Math.max(1, Math.floor(sampleRate * Math.min(t60 * 1.15, MAX_SECONDS)));
   // 遅延線の長さ=1周期分。整数に丸めると音程がずれるため、読み出しは小数位置で線形補間する。
   // ループを1周する遅延には、後段の一次ローパスの群遅延(≒loopMixサンプル)も加わるため、
@@ -48,20 +56,28 @@ function renderPluckWave(sampleRate, freq, { t60, pickBrightness, loopMix }) {
   const lineLength = Math.max(2, Math.ceil(delay) + 2);
   const line = new Float32Array(lineLength);
 
-  // 撥弦の瞬間の励振。明るさに応じて一次ローパスをかけたノイズを遅延線に詰める
-  let lp = 0;
+  // 撥弦の瞬間の弦の形は「弾いた点を頂点とする三角形」に近い。この形で励振すると倍音が
+  // 1/n^2 で減衰する自然な立ち上がりになる。白色ノイズだけで励振すると全ての倍音が同じ強さで
+  // 立ち上がるため、硬く軽い音になり、アタックが全振幅のスパイクになってしまう。
+  // ピックが弦に当たる瞬間のノイズは、その上に少量だけ重ねる
+  const peakIndex = Math.max(1, Math.min(lineLength - 1, Math.round(lineLength * pluckPosition)));
   let sum = 0;
   for (let i = 0; i < lineLength; i++) {
-    lp += pickBrightness * (Math.random() * 2 - 1 - lp);
-    line[i] = lp;
-    sum += lp;
+    const shape = i < peakIndex ? i / peakIndex : (lineLength - i) / (lineLength - peakIndex);
+    const value = shape + noiseAmount * (Math.random() * 2 - 1);
+    line[i] = value;
+    sum += value;
   }
-  // 直流成分が残るとループを回るうちに音が濁るため取り除く
+  // 直流成分が残るとループを回るうちに音が濁るため取り除く(三角形は特に直流が大きい)
   const mean = sum / lineLength;
   for (let i = 0; i < lineLength; i++) line[i] -= mean;
 
   // 基音がt60秒で60dB落ちるループゲイン(倍音の減衰はループフィルタ側が受け持つ)
   const loopGain = Math.pow(10, -3 / (t60 * sampleRate));
+
+  // 楽器のボディ/ピックアップで高域が丸められるぶんを一次ローパスで近似する
+  const toneCoeff = 1 - Math.exp((-2 * Math.PI * toneCutoff) / sampleRate);
+  let tone = 0;
 
   const out = new Float32Array(outLength);
   let write = 0;
@@ -79,10 +95,12 @@ function renderPluckWave(sampleRate, freq, { t60, pickBrightness, loopMix }) {
 
     const sample = filtered * loopGain;
     line[write] = sample;
-    out[n] = sample;
     write = (write + 1) % lineLength;
 
-    const abs = Math.abs(sample);
+    tone += toneCoeff * (sample - tone);
+    out[n] = tone;
+
+    const abs = Math.abs(tone);
     if (abs > peak) peak = abs;
   }
 
