@@ -68,8 +68,16 @@ export function setActiveTabId(library, tabId) {
 
 // ghost: trueの場合、この弦はミュート/パーカッシブなヒット(✕表示)として扱う。
 // 和音は複数ピッチを持てるため、通常のフレット音とゴースト(ミュート弦)を1つの和音内に混在させられる
-export function createNoteEntry({ string, fret, duration, dotted = false, ghost = false }) {
-  return { type: 'note', notes: [{ string, fret, ghost }], duration, dotted, articulation: null, tuplet: null };
+export function createNoteEntry({ string, fret, duration, dotted = false, ghost = false, staccato = false }) {
+  return {
+    type: 'note',
+    notes: [{ string, fret, ghost }],
+    duration,
+    dotted,
+    staccato,
+    articulation: null,
+    tuplet: null,
+  };
 }
 
 export function createRestEntry(duration, dotted = false) {
@@ -89,6 +97,7 @@ export function migrateEntry(entry) {
     notes: pitches.map((p) => ({ string: p.string, fret: p.fret, ghost: wasGhostEntry || Boolean(p.ghost) })),
     duration: entry.duration,
     dotted: entry.dotted,
+    staccato: Boolean(entry.staccato), // staccatoを持たない旧形式は無効として扱う
     articulation: entry.articulation,
     tuplet: entry.tuplet,
   };
@@ -145,12 +154,29 @@ export function canAddPitch(entry) {
   return Boolean(entry) && entry.type === 'note';
 }
 
-// notes配列のindex位置のエントリに(string, fret)を追加する。
-// 既に同じ弦が使われている場合、同じフレットなら除去(最低1音は残す)、異なるフレットなら何もしない
-// (1本の弦は同時に1音までのため)。ピッチ構成が変わることで、直前のエントリからこのエントリへの
-// articulationが無効になる場合(タイなら和音同士でもvoicingが一致しなくなった、それ以外は
-// 単音同士専用なので和音化した時点で常に無効)はクリアする
-export function addPitchToEntry(notes, index, pitch) {
+// articulationは「このエントリから次のエントリへの連結」を表すため、ピッチ構成が変わったら
+// 成立条件を満たすか再評価する。ハンマリング/プリングはフレットの上下で種別が決まるので、
+// 差し替えで向きが逆転した場合はクリアせず種別を付け替える
+function reevaluateArticulation(notes, index, tuning) {
+  const entry = notes[index];
+  if (!entry || !isArticulation(entry.articulation)) return entry;
+
+  if (entry.articulation === 'tie') {
+    return canTie(notes, index) ? entry : { ...entry, articulation: null };
+  }
+  if (entry.articulation === 'slide') {
+    return canSlide(notes, index, tuning) ? entry : { ...entry, articulation: null };
+  }
+  if (!canHammerPull(notes, index)) return { ...entry, articulation: null };
+  const type = notes[index + 1].notes[0].fret > entry.notes[0].fret ? 'hammerOn' : 'pullOff';
+  return type === entry.articulation ? entry : { ...entry, articulation: type };
+}
+
+// notes配列のindex位置のエントリに(string, fret)を追加する。既に同じ弦が使われている場合、
+// 同じフレットなら除去(最低1音は残す)、異なるフレットならその弦のフレットを差し替える
+// (1本の弦は同時に1音までのため。貼り付けた和音の一音だけを直す・入力済みの音符のフレットを
+// 修正する手段を兼ねる)。差し替えではゴースト属性は元のまま維持する
+export function addPitchToEntry(notes, index, pitch, tuning) {
   const entry = notes[index];
   if (!canAddPitch(entry)) return notes;
 
@@ -162,23 +188,15 @@ export function addPitchToEntry(notes, index, pitch) {
     if (entry.notes.length === 1) return notes;
     nextPitches = entry.notes.filter((_, pi) => pi !== existingIdx);
   } else {
-    return notes;
+    nextPitches = entry.notes.map((p, pi) => (pi === existingIdx ? { ...p, fret: pitch.fret } : p));
   }
 
-  const updatedEntry = {
-    ...entry,
-    notes: nextPitches,
-    articulation: nextPitches.length > 1 ? null : entry.articulation,
-  };
-
-  return notes.map((n, i) => {
-    if (i === index) return updatedEntry;
-    if (i === index - 1 && isArticulation(n.articulation)) {
-      const stillTied = n.articulation === 'tie' && sameVoicing(n, updatedEntry);
-      if (!stillTied) return { ...n, articulation: null };
-    }
-    return n;
-  });
+  const updated = notes.map((n, i) => (i === index ? { ...entry, notes: nextPitches } : n));
+  // ピッチ構成が変わると、このエントリから次への連結と、直前のエントリからこのエントリへの
+  // 連結の双方が成立しなくなることがあるため、両方を再評価する
+  return updated.map((n, i) =>
+    i === index - 1 || i === index ? reevaluateArticulation(updated, i, tuning) : n
+  );
 }
 
 // 既存の複数音符を1つの和音エントリへ統合できるか。条件: 2音符以上・全てtype: "note"・
@@ -287,6 +305,19 @@ export function setDottedRange(notes, startIndex, endIndex, dotted) {
   return notes.map((n, i) => (i >= from && i <= to ? { ...n, dotted } : n));
 }
 
+// スタッカートは発音しない休符には意味を持たないため、選択範囲のうち音符にのみ適用する
+export function setStaccatoRange(notes, startIndex, endIndex, staccato) {
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  return notes.map((n, i) => (i >= from && i <= to && n.type === 'note' ? { ...n, staccato } : n));
+}
+
+// 選択範囲にスタッカートを適用できるか(音符が1つも無ければ適用先が無い)
+export function canStaccato(notes, startIndex, endIndex) {
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  const range = notes.slice(from, to + 1);
+  return range.length > 0 && range.some((n) => n && n.type === 'note');
+}
+
 // 連符化: 選択範囲(2音符以上、durationが全て同じ)が対象。nは選択範囲の音符数をそのまま使う
 export function canTuplet(notes, startIndex, endIndex) {
   const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
@@ -388,6 +419,33 @@ export function canSlide(notes, index, tuning) {
   const pitchA = pitchAtEntry(tuning, a);
   const pitchB = pitchAtEntry(tuning, b);
   return pitchA != null && pitchB != null && pitchA !== pitchB;
+}
+
+// 選択範囲の全ピッチのフレットをdelta分だけ動かせるか。1つでもフレット範囲(0〜fretCount)を
+// 外れるなら不可とする(一部のピッチだけ動かすと和音の構成が崩れるため、範囲全体で可否を判定する)
+export function canTranspose(notes, startIndex, endIndex, delta, fretCount) {
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  const range = notes.slice(from, to + 1);
+  if (range.length === 0 || range.some((n) => !n)) return false;
+  const pitches = range.filter((n) => n.type === 'note').flatMap((n) => n.notes);
+  if (pitches.length === 0) return false; // 全て休符の選択には適用できない
+  return pitches.every((p) => p.fret + delta >= 0 && p.fret + delta <= fretCount);
+}
+
+// 選択範囲の音符のフレットをdelta分だけ動かす(1フレット=半音)。和音は全ピッチを同じだけ
+// 動かしてvoicingを保ったまま平行移動する。休符はそのまま残す
+export function transposeRange(notes, startIndex, endIndex, delta, fretCount, tuning) {
+  if (!canTranspose(notes, startIndex, endIndex, delta, fretCount)) return notes;
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+
+  const moved = notes.map((n, i) =>
+    i >= from && i <= to && n.type === 'note'
+      ? { ...n, notes: n.notes.map((p) => ({ ...p, fret: p.fret + delta })) }
+      : n
+  );
+  // 範囲の直前のエントリから範囲先頭への連結と、範囲内の各連結は、ピッチが変わることで
+  // 成立しなくなることがあるため再評価する(範囲全体を同じだけ動かした場合は維持される)
+  return moved.map((n, i) => (i >= from - 1 && i <= to ? reevaluateArticulation(moved, i, tuning) : n));
 }
 
 export function toggleTieAt(notes, index) {

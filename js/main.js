@@ -31,10 +31,14 @@ import {
   removeRange,
   setDurationRange,
   setDottedRange,
+  setStaccatoRange,
+  canStaccato,
   canTie,
   canHammerPull,
   canSlide,
   canTuplet,
+  canTranspose,
+  transposeRange,
   canAddPitch,
   addPitchToEntry,
   canMergeChord,
@@ -59,8 +63,8 @@ import {
   legacyTempoOf,
   legacyTimeSignatureOf,
 } from './tab.js';
-import { renderTab } from './tabRender.js';
-import { playTab } from './tabPlayback.js';
+import { renderTab, setPlayingColumn, getColumnElement } from './tabRender.js';
+import { playTab, playbackStartTime, warmUpVoices } from './tabPlayback.js';
 
 const OCTAVE_OPTIONS = [0, 1, 2, 3, 4, 5, 6];
 const CUSTOM_PRESET_VALUE = 'custom';
@@ -112,6 +116,7 @@ const tabTitleInput = document.getElementById('tab-title-input');
 const durationButtonsEl = document.getElementById('duration-buttons');
 const tabRestBtn = document.getElementById('tab-rest-btn');
 const tabDottedBtn = document.getElementById('tab-dotted-btn');
+const tabStaccatoBtn = document.getElementById('tab-staccato-btn');
 const tabGhostBtn = document.getElementById('tab-ghost-btn');
 const tabChordBtn = document.getElementById('tab-chord-btn');
 const tabTieBtn = document.getElementById('tab-tie-btn');
@@ -119,6 +124,8 @@ const tabHammerPullBtn = document.getElementById('tab-hammer-pull-btn');
 const tabSlideBtn = document.getElementById('tab-slide-btn');
 const tabTupletBtn = document.getElementById('tab-tuplet-btn');
 const tabDeleteBtn = document.getElementById('tab-delete-btn');
+const tabTransposeUpBtn = document.getElementById('tab-transpose-up-btn');
+const tabTransposeDownBtn = document.getElementById('tab-transpose-down-btn');
 const tabUndoBtn = document.getElementById('tab-undo-btn');
 const tabRedoBtn = document.getElementById('tab-redo-btn');
 const tabCopyBtn = document.getElementById('tab-copy-btn');
@@ -145,14 +152,22 @@ const simultaneousTabIds = new Set(); // 同時再生対象の他TAB id(セッ�
 let tabClipboard = null; // TABをまたいで共有するクリップボード
 let selectedDuration = 'quarter';
 let dottedInput = false;
+let staccatoInput = false; // 次に入力する音符へスタッカートを付けるか(付点と同様に引き継ぐ)
 let pendingInputMode = 'note'; // 'note' | 'ghost'
 let chordInputMode = false; // 有効時、単一選択中のエントリへ指板クリックでピッチを追加する
-let playbackHandle = null;
+// 再生セッション。同時再生では複数トラック(アクティブTAB + 同時再生に選択された他TAB)が
+// 並行して鳴るため、1セッションとして全トラックのハンドルをまとめて保持し、
+// 「全トラックが終わって初めて再生終了」とする。
+// { tracks: [{ handle, finished, isActive }], pending }
+// onNoteStart/onEndのコールバックは、発行時点のセッションオブジェクトが現在も有効な場合のみ処理する
+// (停止操作とタイマー発火がほぼ同時に起きた場合などに、既に停止済み・別セッションに切り替わった
+// 後の古いコールバックがplayingIndex等の状態を誤って書き換えるのを防ぐ)
+let playbackSession = null;
 let playingIndex = null;
-// 再生セッションごとに増分するトークン。onNoteStart/onEndのコールバックは、発行時点のセッションが
-// 現在も有効な場合のみ処理する(停止操作とタイマー発火がほぼ同時に起きた場合などに、既に停止済み・
-// 別セッションに切り替わった後の古いコールバックがplayingIndex等の状態を誤って書き換えるのを防ぐ)
-let playbackSessionId = 0;
+
+function isTabPlaying() {
+  return playbackSession !== null;
+}
 
 const DISPLAY_MODE_LABELS = {
   scale: 'スケール構成音',
@@ -318,7 +333,7 @@ function renderStringList() {
 // --- マルチTAB管理 ---
 
 function renderTabBar() {
-  const isPlaying = Boolean(playbackHandle);
+  const isPlaying = isTabPlaying();
   tabBarListEl.replaceChildren(
     ...tabLibrary.tabs.map((t) => {
       const item = document.createElement('div');
@@ -371,7 +386,7 @@ function renderSimulPlayList() {
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.checked = simultaneousTabIds.has(t.id);
-      checkbox.disabled = Boolean(playbackHandle);
+      checkbox.disabled = isTabPlaying();
       checkbox.addEventListener('change', () => {
         if (checkbox.checked) simultaneousTabIds.add(t.id);
         else simultaneousTabIds.delete(t.id);
@@ -390,7 +405,7 @@ function renderSimulPlayList() {
 // アクティブTABを切り替える。切り替え元のUndo履歴・選択範囲はtabSessionsへ退避し、
 // 切り替え先の状態(あれば)を復元する
 function switchToTab(tabId) {
-  if (playbackHandle || tabId === tabLibrary.activeTabId) return;
+  if (isTabPlaying() || tabId === tabLibrary.activeTabId) return;
 
   tabSessions.set(tabData.id, { history: tabHistory, selection: tabSelection });
 
@@ -411,7 +426,7 @@ function switchToTab(tabId) {
 }
 
 function deleteTab(tabId) {
-  if (playbackHandle) return;
+  if (isTabPlaying()) return;
   const wasActive = tabId === tabLibrary.activeTabId;
 
   tabLibrary = removeTabFromLibrary(tabLibrary, tabId);
@@ -468,6 +483,11 @@ function syncDottedButton() {
   tabDottedBtn.setAttribute('aria-pressed', String(dottedInput));
 }
 
+function syncStaccatoButton() {
+  tabStaccatoBtn.classList.toggle('active', staccatoInput);
+  tabStaccatoBtn.setAttribute('aria-pressed', String(staccatoInput));
+}
+
 function syncTabLibrary() {
   tabLibrary = { ...tabLibrary, tabs: tabLibrary.tabs.map((t) => (t.id === tabData.id ? tabData : t)) };
   saveTabLibrary(tabLibrary);
@@ -486,11 +506,17 @@ function handleFretboardNoteInput(stringIndex, fret) {
     tabSelection && tabSelection.start === tabSelection.end ? tabSelection.start : undefined;
   const isGhost = pendingInputMode === 'ghost';
 
-  // 和音入力モード中、単一の音符を選択していれば新規挿入せずそのエントリにピッチを追加する。
+  // 和音入力モード中、単一の音符を選択していれば新規挿入せずそのエントリにピッチを追加する
+  // (既に音がある弦なら、同じフレットで除去・異なるフレットで差し替え)。
   // ghostは弦(ピッチ)ごとの属性なので、既存の和音に通常のフレット音とミュート弦を混在させられる
   if (chordInputMode && singleSelected !== undefined && canAddPitch(tabData.notes[singleSelected])) {
     commitTab({
-      notes: addPitchToEntry(tabData.notes, singleSelected, { string: stringIndex, fret, ghost: isGhost }),
+      notes: addPitchToEntry(
+        tabData.notes,
+        singleSelected,
+        { string: stringIndex, fret, ghost: isGhost },
+        tabData.tuning
+      ),
     });
     if (isGhost) {
       pendingInputMode = 'note';
@@ -506,6 +532,7 @@ function handleFretboardNoteInput(stringIndex, fret) {
     duration: selectedDuration,
     dotted: dottedInput,
     ghost: isGhost,
+    staccato: staccatoInput,
   });
 
   commitTab({ notes: insertEntry(tabData.notes, entry, singleSelected) });
@@ -536,13 +563,140 @@ function handleTabColumnClick(index, event) {
   renderTabView();
 }
 
+// 再生中の全トラックを停止し、UIを停止状態へ戻す
 function stopTabPlayback() {
-  playbackSessionId++; // このセッションの古いコールバックを以後すべて無効化する
-  playbackHandle?.stop();
-  playbackHandle = null;
+  const session = playbackSession;
+  playbackSession = null; // 以後、このセッションのコールバックはすべて無効になる
+  // 1トラックの停止で例外が起きても残りのトラックは必ず止める。止め損ねた音が残ったまま
+  // 停止状態のUIに戻ると、次に再生したときに前回の音と重なって鳴ってしまうため
+  session?.tracks.forEach((track) => {
+    try {
+      track.handle?.stop();
+    } catch (error) {
+      console.error(error);
+    }
+  });
   playingIndex = null;
   tabPlayBtn.textContent = '再生';
   render();
+}
+
+function startTabPlayback() {
+  // 直前のセッションが何らかの理由で残っている場合に備え、必ず止めてから始める(多重再生の防止)
+  if (playbackSession) stopTabPlayback();
+
+  // 同時再生の対象はあくまで「他TAB」。アクティブTABが混ざると二重に発音されるため明示的に除外する
+  const others = tabLibrary.tabs.filter((t) => t.id !== tabData.id && simultaneousTabIds.has(t.id));
+  if (tabData.notes.length === 0 && others.length === 0) return;
+
+  // アクティブTABは選択位置(複数選択時は選択範囲の先頭)からそのまま再生する。
+  // 他TABはリズムが異なりインデックスの対応が取れないため、アクティブTABの開始位置を
+  // 拍数に変換し、その拍数に対応する自TAB内の位置から再生することで同期を保つ
+  const startIndex = tabSelection ? Math.min(tabSelection.start, tabSelection.end) : 0;
+  const targetBeats = beatsBeforeIndex(tabData.notes, startIndex);
+
+  // 実際に鳴らすトラック(アクティブTAB + 開始位置が譜面内に収まる他TAB)
+  const plan = [{ tab: tabData, isActive: true, from: startIndex }];
+  others.forEach((otherTab) => {
+    const otherStartIndex = indexAtBeats(otherTab.notes, targetBeats);
+    if (otherStartIndex >= otherTab.notes.length) return; // この時点で既に演奏が終わっているTABは再生しない
+    plan.push({ tab: otherTab, isActive: false, from: otherStartIndex });
+  });
+
+  // 音高ごとの波形生成は初回だけコストがかかるため、開始時刻を決める前に済ませておく
+  plan.forEach(({ tab, from }) =>
+    warmUpVoices(tab, tab.tuning, { octaveUp: state.tabOctaveUp, startIndex: from })
+  );
+
+  // 全トラックで開始時刻を共有する。トラックごとに再生開始時にその場の時刻を読むと、
+  // 先に予約したトラックのスケジューリングに要した時間だけ後続が遅れて鳴り出す
+  // (音符数の多いTABをアクティブにしたときほど、他TABの遅れが大きくなる)
+  const startAt = playbackStartTime(plan.reduce((sum, p) => sum + (p.tab.notes.length - p.from), 0));
+
+  const session = { tracks: [], pending: 0 };
+  // スケジューリング途中で例外が起きても、それまでに鳴り始めたトラックを停止できるよう
+  // 先にセッションを保持しておく(停止手段を失った音が残ると次の再生と重なってしまう)
+  playbackSession = session;
+
+  function addTrack(tab, isActive, options) {
+    const track = { handle: null, finished: false, isActive };
+    session.tracks.push(track);
+    session.pending += 1;
+    track.handle = playTab(tab, tab.tuning, {
+      tempo: state.tempo,
+      timeSignature: state.timeSignature,
+      octaveUp: state.tabOctaveUp,
+      startAt,
+      ...options,
+      onEnd: () => finishTrack(session, track),
+    });
+  }
+
+  try {
+    plan.forEach(({ tab, isActive, from }) => {
+      addTrack(tab, isActive, {
+        // メトロノームは(ONの場合)アクティブTAB分の1系統のみ鳴らす
+        metronome: isActive && state.tabMetronome,
+        startIndex: from,
+        onNoteStart: isActive
+          ? (index) => {
+              if (session !== playbackSession) return;
+              updatePlayingIndex(index);
+            }
+          : undefined,
+      });
+    });
+  } catch (error) {
+    console.error(error);
+    stopTabPlayback(); // 中途半端に鳴り始めた音を残さない
+    showToast('再生を開始できませんでした。');
+    return;
+  }
+
+  tabPlayBtn.textContent = '停止';
+  renderTabBar();
+  renderSimulPlayList();
+  syncTabJsonView();
+}
+
+// 1トラック分の再生終了。同時再生では、アクティブTABが先に終わっても他TABが鳴り続けている間は
+// 再生中(停止ボタン)のままにし、全トラックが終わって初めて停止状態へ戻す
+function finishTrack(session, track) {
+  if (session !== playbackSession || track.finished) return;
+  track.finished = true;
+  session.pending -= 1;
+
+  if (session.pending <= 0) {
+    stopTabPlayback();
+    return;
+  }
+
+  // アクティブTAB自身の演奏だけが終わった場合は、再生位置ハイライトを消して他TABの再生を続ける
+  if (track.isActive) {
+    updatePlayingIndex(null);
+  }
+}
+
+// 選択範囲の音符を半音(=1フレット)単位で上げ下げする。範囲内のピッチが1つでも
+// フレット範囲を外れる場合は、和音の構成が崩れないよう操作全体を行わない
+function canTransposeSelection(delta) {
+  if (!tabSelection) return false;
+  return canTranspose(tabData.notes, tabSelection.start, tabSelection.end, delta, tabData.fretCount);
+}
+
+function transposeSelection(delta) {
+  if (!canTransposeSelection(delta)) return;
+  commitTab({
+    notes: transposeRange(
+      tabData.notes,
+      tabSelection.start,
+      tabSelection.end,
+      delta,
+      tabData.fretCount,
+      tabData.tuning
+    ),
+  });
+  renderTabView();
 }
 
 function syncTabButtons() {
@@ -552,6 +706,8 @@ function syncTabButtons() {
 
   tabDeleteBtn.disabled = !hasSelection;
   tabCopyBtn.disabled = !hasSelection;
+  tabTransposeUpBtn.disabled = !canTransposeSelection(1);
+  tabTransposeDownBtn.disabled = !canTransposeSelection(-1);
   tabPasteBtn.disabled = !tabClipboard;
   tabUndoBtn.disabled = tabHistory.past.length === 0;
   tabRedoBtn.disabled = tabHistory.future.length === 0;
@@ -586,7 +742,7 @@ function syncTabButtons() {
     btn.classList.toggle('active', btn.dataset.duration === selectedDuration);
   });
 
-  tabPlayBtn.disabled = tabData.notes.length === 0 && simultaneousTabIds.size === 0 && !playbackHandle;
+  tabPlayBtn.disabled = tabData.notes.length === 0 && simultaneousTabIds.size === 0 && !isTabPlaying();
 }
 
 function renderTabView() {
@@ -616,9 +772,18 @@ function scrollTabIntoView() {
   const isPlaying = playingIndex != null;
   const focusIndex = playingIndex ?? (tabSelection ? tabSelection.end : tabData.notes.length - 1);
   if (focusIndex == null || focusIndex < 0) return;
-  const col = tabDisplay.querySelectorAll('.tab-col')[focusIndex];
   // 再生中は先の音符を見越しやすいよう、再生中の音符を表示エリアの中央に寄せる
-  col?.scrollIntoView({ inline: isPlaying ? 'center' : 'nearest', block: 'nearest' });
+  getColumnElement(focusIndex)?.scrollIntoView({ inline: isPlaying ? 'center' : 'nearest', block: 'nearest' });
+}
+
+// 再生位置の移動。音符ごとにTAB表示エリア全体を作り直すと、音符数の多い譜面では1音ごとに
+// 数千要素の再生成が走って再生中の操作を受け付けられなくなるため、実際に変化する
+// 「ハイライトされる列」「スクロール位置」「JSON編集エリアの選択範囲」だけを更新する
+function updatePlayingIndex(index) {
+  playingIndex = index;
+  setPlayingColumn(index);
+  scrollTabIntoView();
+  syncTabJsonPlayingRange();
 }
 
 // --- JSON直接編集 ---
@@ -711,9 +876,28 @@ function setTabJsonError(message) {
   tabJsonError.classList.toggle('visible', Boolean(message));
 }
 
-// テキストエリア内でrangeStartを含む行の先頭が一番上に来るようスクロールする
-function scrollTabJsonToOffset(text, offset) {
-  const lineIndex = (text.slice(0, offset).match(/\n/g) || []).length;
+// 表示中のJSONテキストに対する音符ごとの文字範囲と行番号。テキストを組み立て直したときだけ
+// 作り直し、再生位置の移動では使い回す(1音ごとに数十万文字を走査し直さないため)
+let tabJsonRanges = [];
+let tabJsonLineOfRange = [];
+
+function cacheTabJsonRanges(text) {
+  tabJsonRanges = computeNoteJsonRanges(text);
+  // 各範囲の開始オフセットが何行目かを、テキスト1回の走査でまとめて求める
+  tabJsonLineOfRange = [];
+  let line = 0;
+  let cursor = 0;
+  tabJsonRanges.forEach(([start], i) => {
+    while (cursor < start) {
+      if (text.charCodeAt(cursor) === 10) line++;
+      cursor++;
+    }
+    tabJsonLineOfRange[i] = line;
+  });
+}
+
+// テキストエリア内で、指定した行が一番上に来るようスクロールする
+function scrollTabJsonToLine(lineIndex) {
   const lineHeight = parseFloat(getComputedStyle(tabJsonTextarea).lineHeight) || 18;
   const target = Math.max(0, lineIndex * lineHeight);
   tabJsonTextarea.scrollTop = target;
@@ -723,26 +907,35 @@ function scrollTabJsonToOffset(text, offset) {
   });
 }
 
+// 再生位置に対応する箇所のハイライトだけを更新する(テキストの再生成・再走査は行わない)
+function syncTabJsonPlayingRange() {
+  if (!tabJsonDetails.open || document.activeElement === tabJsonTextarea) return;
+  if (playingIndex == null) return;
+  const range = tabJsonRanges[playingIndex];
+  if (!range) return;
+  tabJsonTextarea.setSelectionRange(range[0], range[1]);
+  scrollTabJsonToLine(tabJsonLineOfRange[playingIndex]);
+}
+
 function syncTabJsonView() {
-  tabJsonTextarea.disabled = Boolean(playbackHandle);
+  tabJsonTextarea.disabled = isTabPlaying();
   if (!tabJsonDetails.open) return;
   if (document.activeElement === tabJsonTextarea) return; // 編集中は上書きしない(カーソル位置を保持)
 
   const text = formatTabDataJson(tabData, state.timeSignature);
   tabJsonTextarea.value = text;
   setTabJsonError('');
+  cacheTabJsonRanges(text);
 
-  const ranges = computeNoteJsonRanges(text);
+  const ranges = tabJsonRanges;
   if (playingIndex != null && ranges[playingIndex]) {
-    const [start, end] = ranges[playingIndex];
-    tabJsonTextarea.setSelectionRange(start, end);
-    scrollTabJsonToOffset(text, start);
+    syncTabJsonPlayingRange();
   } else if (tabSelection) {
     const from = Math.min(tabSelection.start, tabSelection.end);
     const to = Math.max(tabSelection.start, tabSelection.end);
     if (ranges[from] && ranges[to]) {
       tabJsonTextarea.setSelectionRange(ranges[from][0], ranges[to][1]);
-      scrollTabJsonToOffset(text, ranges[from][0]);
+      scrollTabJsonToLine(tabJsonLineOfRange[from]);
     }
   } else {
     tabJsonTextarea.setSelectionRange(0, 0);
@@ -766,7 +959,7 @@ function isValidImportedTuning(value) {
 }
 
 function applyTabJsonText(rawText) {
-  if (playbackHandle) return;
+  if (isTabPlaying()) return;
 
   let parsed;
   try {
@@ -836,6 +1029,20 @@ tabDottedBtn.addEventListener('click', () => {
     commitTab({ notes: setDottedRange(tabData.notes, tabSelection.start, tabSelection.end, dottedInput) });
   }
   syncDottedButton();
+syncStaccatoButton();
+  renderTabView();
+});
+
+// 付点と同じく、次の入力への引き継ぎと選択範囲への一括適用を兼ねる。
+// 休符には発音が無く意味を持たないため、選択範囲のうち音符にのみ適用する
+tabStaccatoBtn.addEventListener('click', () => {
+  staccatoInput = !staccatoInput;
+  if (tabSelection && canStaccato(tabData.notes, tabSelection.start, tabSelection.end)) {
+    commitTab({
+      notes: setStaccatoRange(tabData.notes, tabSelection.start, tabSelection.end, staccatoInput),
+    });
+  }
+  syncStaccatoButton();
   renderTabView();
 });
 
@@ -865,6 +1072,9 @@ tabTupletBtn.addEventListener('click', () => {
   commitTab({ notes: toggleTupletAt(tabData.notes, tabSelection.start, tabSelection.end) });
   renderTabView();
 });
+
+tabTransposeUpBtn.addEventListener('click', () => transposeSelection(1));
+tabTransposeDownBtn.addEventListener('click', () => transposeSelection(-1));
 
 tabDeleteBtn.addEventListener('click', () => {
   if (!tabSelection) return;
@@ -964,72 +1174,11 @@ tabColorSyncBtn.addEventListener('click', () => {
 });
 
 tabPlayBtn.addEventListener('click', () => {
-  if (playbackHandle) {
+  if (isTabPlaying()) {
     stopTabPlayback();
     return;
   }
-
-  const others = tabLibrary.tabs.filter((t) => simultaneousTabIds.has(t.id));
-  if (tabData.notes.length === 0 && others.length === 0) return;
-
-  // アクティブTABは選択位置(複数選択時は選択範囲の先頭)からそのまま再生する。
-  // 他TABはリズムが異なりインデックスの対応が取れないため、アクティブTABの開始位置を
-  // 拍数に変換し、その拍数に対応する自TAB内の位置から再生することで同期を保つ
-  const startIndex = tabSelection ? Math.min(tabSelection.start, tabSelection.end) : 0;
-  const targetBeats = beatsBeforeIndex(tabData.notes, startIndex);
-
-  const sessionId = ++playbackSessionId;
-  const handles = [];
-  let remaining = 0;
-
-  function handleOneEnd() {
-    if (sessionId !== playbackSessionId) return; // 既に停止/別セッションへ切り替わった後の古い通知は無視する
-    remaining -= 1;
-    if (remaining <= 0) stopTabPlayback();
-  }
-
-  remaining += 1;
-  handles.push(
-    playTab(tabData, tabData.tuning, {
-      tempo: state.tempo,
-      timeSignature: state.timeSignature,
-      metronome: state.tabMetronome,
-      octaveUp: state.tabOctaveUp,
-      startIndex,
-      onNoteStart: (index) => {
-        if (sessionId !== playbackSessionId) return;
-        playingIndex = index;
-        renderTabView();
-      },
-      onEnd: handleOneEnd,
-    })
-  );
-
-  others.forEach((otherTab) => {
-    const otherStartIndex = indexAtBeats(otherTab.notes, targetBeats);
-    if (otherStartIndex >= otherTab.notes.length) return; // この時点で既に演奏が終わっているTABは再生しない
-    remaining += 1;
-    handles.push(
-      playTab(otherTab, otherTab.tuning, {
-        tempo: state.tempo,
-        timeSignature: state.timeSignature,
-        metronome: false,
-        octaveUp: state.tabOctaveUp,
-        startIndex: otherStartIndex,
-        onEnd: handleOneEnd,
-      })
-    );
-  });
-
-  playbackHandle = {
-    stop() {
-      handles.forEach((h) => h.stop());
-    },
-  };
-  tabPlayBtn.textContent = '停止';
-  renderTabBar();
-  renderSimulPlayList();
-  syncTabJsonView();
+  startTabPlayback();
 });
 
 // 画面上部の設定(セクション5でlocalStorageに保存している項目)のスナップショット
@@ -1279,7 +1428,7 @@ function debounce(fn, waitMs) {
 }
 
 tabAddBtn.addEventListener('click', () => {
-  if (playbackHandle) return;
+  if (isTabPlaying()) return;
   newTabPartNameInput.value = '';
   newTabPresetSelect.value = TUNING_PRESETS[0].id;
   newTabDialog.showModal();

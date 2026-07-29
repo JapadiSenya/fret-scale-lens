@@ -27,6 +27,31 @@ const DURATION_JA = {
   '16th': '16分音符',
 };
 
+// 直近のrenderTabで生成した列要素(notesのインデックス順)。再生位置の移動のように
+// 「クラスが1〜2個変わるだけ」の更新で全体を作り直さずに済ませるため保持する
+let renderedColumns = [];
+let playingColumnIndex = null;
+
+/**
+ * 再生中の音符のハイライトだけを差分更新する。音符数の多い譜面では全体の再描画が非常に重く、
+ * 音符ごとに作り直すと再生中に操作を受け付けられなくなるため、変化する列のみを書き換える
+ * @param {number|null} index
+ * @returns {HTMLElement|null} 新たに再生中となった列要素
+ */
+export function setPlayingColumn(index) {
+  if (playingColumnIndex !== index) {
+    renderedColumns[playingColumnIndex]?.classList.remove('playing');
+    playingColumnIndex = index;
+    renderedColumns[index]?.classList.add('playing');
+  }
+  return getColumnElement(index);
+}
+
+/** notesのインデックスに対応する列要素(未描画・範囲外ならnull) */
+export function getColumnElement(index) {
+  return index == null ? null : renderedColumns[index] ?? null;
+}
+
 function inRange(index, selection) {
   if (!selection) return false;
   const { start, end } = selection;
@@ -71,6 +96,9 @@ export function renderTab(
   const stringCount = displayStrings.length;
   const notes = tabData.notes;
   const measures = computeMeasures(notes, timeSignature);
+
+  renderedColumns = [];
+  playingColumnIndex = playingIndex ?? null;
 
   const tupletByIndex = new Map();
   computeTupletGroups(notes).forEach((group) => {
@@ -117,16 +145,28 @@ export function renderTab(
     col.title =
       (DURATION_JA[entry.duration] || '') +
       (entry.dotted ? '(付点)' : '') +
+      (entry.staccato ? '(スタッカート)' : '') +
       (tupletInfo ? `(${tupletInfo.n}連符)` : '');
     col.tabIndex = 0;
     col.setAttribute('role', 'button');
 
+    // 連符のブラケット・数字と、スタッカートの「・」を同じ行(音符長シンボルの上)に置く
     const tupletRow = document.createElement('div');
     tupletRow.className = 'tab-tuplet-row';
     if (tupletInfo) {
       tupletRow.classList.add('tab-tuplet-marked');
       if (!tupletInfo.complete) tupletRow.classList.add('tab-tuplet-incomplete');
-      if (tupletInfo.isLabel) tupletRow.textContent = String(tupletInfo.n);
+      if (tupletInfo.isLabel) {
+        const label = document.createElement('span');
+        label.textContent = String(tupletInfo.n);
+        tupletRow.appendChild(label);
+      }
+    }
+    if (entry.staccato) {
+      const dot = document.createElement('span');
+      dot.className = 'tab-staccato-dot';
+      dot.textContent = '・';
+      tupletRow.appendChild(dot);
     }
     col.appendChild(tupletRow);
 
@@ -196,7 +236,9 @@ export function renderTab(
     measureEl.appendChild(numberLabel);
 
     for (let index = measure.startIndex; index <= measure.endIndex; index++) {
-      measureEl.appendChild(buildColumn(notes[index], index));
+      const col = buildColumn(notes[index], index);
+      renderedColumns[index] = col;
+      measureEl.appendChild(col);
     }
 
     scrollArea.appendChild(measureEl);
