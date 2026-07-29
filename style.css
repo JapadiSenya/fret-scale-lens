@@ -904,3 +904,11 @@ dialog::backdrop {
   text-align: right;
   color: var(--color-text-muted, #6b6b66);
 }
+
+/* チョーキング。連符の数字と紛れないよう、スタッカートと同じ行で色を分ける */
+.tab-bend-mark {
+  color: var(--color-tab-bend, #b5651d);
+  font-size: 0.75rem;
+  line-height: 1;
+  white-space: nowrap;
+}

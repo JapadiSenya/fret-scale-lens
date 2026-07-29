@@ -30,6 +30,9 @@ export function playbackStartTime(totalEntries = 0) {
 
 const ATTACK_SECONDS = 0.002;
 const RELEASE_SECONDS = 0.12;
+// チョーキングを上げ切るまでの時間。音符の長さに比例させつつ、長い音符で上がり続けないよう頭打ちにする
+const BEND_TIME_RATIO = 0.4;
+const BEND_MAX_SECONDS = 0.18;
 // スタッカートは音符長(リズム上の位置)を変えずに発音の長さだけを切る。余韻も短くして明確に切る
 const STACCATO_RATIO = 0.5;
 const STACCATO_RELEASE_SECONDS = 0.04;
@@ -139,17 +142,27 @@ function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat
   const gain = ctx.createGain();
 
   let t = groupStart;
+  // 一度上げたチョーキングはグループの終わりまで保つ(押さえたまま次の音へ繋がるため)
+  let bendRatio = 1;
   group.items.forEach((item, i) => {
     const dur = getEntryBeats(item) * secondsPerBeat;
     const freq = frequencyForPitch(tuning, pitchOnString(item, stringNum), octaveUp);
     const prevItem = group.items[i - 1];
     if (freq != null && (!prevItem || prevItem.articulation !== 'slide')) {
-      source.playbackRate.setValueAtTime(freq / baseFreq, t);
+      source.playbackRate.setValueAtTime((freq / baseFreq) * bendRatio, t);
+    }
+    if (item.bend && freq != null) {
+      // 弦を押し上げるのにかかる時間ぶんかけて上げ切る(長い音符でも上がり続けないよう上限を設ける)
+      bendRatio = Math.pow(2, item.bend / 12);
+      const bendTime = Math.min(dur * BEND_TIME_RATIO, BEND_MAX_SECONDS);
+      source.playbackRate.linearRampToValueAtTime((freq / baseFreq) * bendRatio, t + bendTime);
     }
     const nextItem = group.items[i + 1];
     if (item.articulation === 'slide' && nextItem) {
       const nextFreq = frequencyForPitch(tuning, pitchOnString(nextItem, stringNum), octaveUp);
-      if (nextFreq != null) source.playbackRate.linearRampToValueAtTime(nextFreq / baseFreq, t + dur);
+      if (nextFreq != null) {
+        source.playbackRate.linearRampToValueAtTime((nextFreq / baseFreq) * bendRatio, t + dur);
+      }
     }
     t += dur;
   });

@@ -38,6 +38,8 @@ import {
   canHammerPull,
   canSlide,
   canTuplet,
+  BEND_OPTIONS,
+  setBendRange,
   canTranspose,
   transposeRange,
   canAddPitch,
@@ -124,6 +126,7 @@ const tabTieBtn = document.getElementById('tab-tie-btn');
 const tabHammerPullBtn = document.getElementById('tab-hammer-pull-btn');
 const tabSlideBtn = document.getElementById('tab-slide-btn');
 const tabTupletBtn = document.getElementById('tab-tuplet-btn');
+const bendButtonsEl = document.getElementById('bend-buttons');
 const tabDeleteBtn = document.getElementById('tab-delete-btn');
 const tabTransposeUpBtn = document.getElementById('tab-transpose-up-btn');
 const tabTransposeDownBtn = document.getElementById('tab-transpose-down-btn');
@@ -455,6 +458,34 @@ function deleteTab(tabId) {
 }
 
 // --- TAB譜作成・再生機能 ---
+
+// チョーキングは選択範囲の音符に対する後付けの操作。既に同じ上げ幅なら解除する
+function populateBendButtons() {
+  bendButtonsEl.replaceChildren(
+    ...BEND_OPTIONS.map((option) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = option.label;
+      btn.dataset.bend = String(option.semitones);
+      btn.addEventListener('click', () => {
+        if (!tabSelection || btn.disabled) return;
+        const next = bendAppliedToSelection(option.semitones) ? null : option.semitones;
+        commitTab({ notes: setBendRange(tabData.notes, tabSelection.start, tabSelection.end, next) });
+        renderTabView();
+      });
+      return btn;
+    })
+  );
+}
+
+// 選択範囲の音符が全てその上げ幅になっているか(ボタンの点灯・解除の判定に使う)
+function bendAppliedToSelection(semitones) {
+  if (!tabSelection) return false;
+  const from = Math.min(tabSelection.start, tabSelection.end);
+  const to = Math.max(tabSelection.start, tabSelection.end);
+  const targets = tabData.notes.slice(from, to + 1).filter((n) => n && n.type === 'note');
+  return targets.length > 0 && targets.every((n) => n.bend === semitones);
+}
 
 function populateDurationButtons() {
   durationButtonsEl.replaceChildren(
@@ -862,6 +893,13 @@ function syncTabButtons() {
 
   [...durationButtonsEl.children].forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.duration === selectedDuration);
+  });
+
+  // チョーキングは音程を持つ音符にのみ効くため、選択範囲に音符が無ければ操作できない
+  const bendOk = hasSelection && canStaccato(tabData.notes, tabSelection.start, tabSelection.end);
+  [...bendButtonsEl.children].forEach((btn) => {
+    btn.disabled = !bendOk;
+    btn.classList.toggle('active', bendOk && bendAppliedToSelection(Number(btn.dataset.bend)));
   });
 
   tabPlayBtn.disabled = tabData.notes.length === 0 && simultaneousTabIds.size === 0 && !isTabPlaying();
@@ -1572,6 +1610,7 @@ populateStaticSelects();
 syncControlsFromState();
 renderStringList();
 populateDurationButtons();
+populateBendButtons();
 syncGhostButton();
 syncChordButton();
 syncDottedButton();
