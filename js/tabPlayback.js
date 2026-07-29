@@ -180,22 +180,60 @@ function scheduleGhostPitch(ctx, tuning, pitch, startTime, activeNodes, octaveUp
   activeNodes.push({ osc: source, gain });
 }
 
-export function scheduleClick(time, accent, activeNodes) {
-  const ctx = getAudioContext();
-  const osc = ctx.createOscillator();
+const CLICK_ATTACK_SECONDS = 0.004;
+const CLICK_DECAY_SECONDS = 0.06;
+const clickTrackCache = new Map();
+
+// クリック音1つ分を波形へ書き込む(従来の矩形波+短い減衰と同じ音)
+function renderClick(data, offset, sampleRate, accent) {
+  const freq = accent ? 1500 : 1000;
+  const peak = accent ? 0.25 : 0.15;
+  const length = Math.floor(sampleRate * (CLICK_DECAY_SECONDS + 0.02));
+  const decayRate = Math.log(0.0001 / peak) / (CLICK_DECAY_SECONDS - CLICK_ATTACK_SECONDS);
+
+  for (let i = 0; i < length && offset + i < data.length; i++) {
+    const t = i / sampleRate;
+    const envelope =
+      t < CLICK_ATTACK_SECONDS
+        ? peak * (t / CLICK_ATTACK_SECONDS)
+        : peak * Math.exp(decayRate * (t - CLICK_ATTACK_SECONDS));
+    data[offset + i] += envelope * (Math.sin(2 * Math.PI * freq * t) >= 0 ? 1 : -1);
+  }
+}
+
+/**
+ * メトロノーム1小節分の波形を返す(先頭拍がアクセント)。曲の長さぶんクリック音のノードを
+ * 並べると、長い曲では数百ノードになってオーディオスレッドの負荷が跳ね上がるため、
+ * 1小節をループ再生する1ノードで賄う。アクセントの周期は小節と一致するのでループで表現できる
+ */
+function getClickTrackBuffer(ctx, tempo, beatsPerMeasure) {
+  const key = `${ctx.sampleRate}:${tempo}:${beatsPerMeasure}`;
+  const cached = clickTrackCache.get(key);
+  if (cached) return cached;
+
+  const secondsPerBeat = 60 / tempo;
+  const length = Math.max(1, Math.round(ctx.sampleRate * secondsPerBeat * beatsPerMeasure));
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let beat = 0; beat < beatsPerMeasure; beat++) {
+    renderClick(data, Math.round(beat * secondsPerBeat * ctx.sampleRate), ctx.sampleRate, beat === 0);
+  }
+
+  clickTrackCache.set(key, buffer);
+  return buffer;
+}
+
+function scheduleMetronome(ctx, tempo, beatsPerMeasure, startTime, endTime, activeNodes) {
+  const source = ctx.createBufferSource();
+  source.buffer = getClickTrackBuffer(ctx, tempo, beatsPerMeasure);
+  source.loop = true;
   const gain = ctx.createGain();
-  osc.type = 'square';
-  osc.frequency.setValueAtTime(accent ? 1500 : 1000, time);
 
-  gain.gain.setValueAtTime(0.0001, time);
-  gain.gain.linearRampToValueAtTime(accent ? 0.25 : 0.15, time + 0.004);
-  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.06);
-
-  osc.connect(gain);
+  source.connect(gain);
   gain.connect(getMasterGain());
-  osc.start(time);
-  osc.stop(time + 0.08);
-  activeNodes?.push({ osc, gain });
+  source.start(startTime);
+  source.stop(endTime);
+  activeNodes.push({ osc: source, gain });
 }
 
 /**
@@ -286,12 +324,8 @@ export function playTab(
 
   const totalEndTime = t;
 
-  if (metronome) {
-    let beatIndex = 0;
-    for (let time = startTime; time < totalEndTime - 0.001; time += secondsPerBeat) {
-      scheduleClick(time, beatIndex % beatsPerMeasure === 0, activeNodes);
-      beatIndex++;
-    }
+  if (metronome && totalEndTime > startTime) {
+    scheduleMetronome(ctx, tempo, beatsPerMeasure, startTime, totalEndTime, activeNodes);
   }
 
   if (onEnd) {
