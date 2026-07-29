@@ -145,12 +145,29 @@ export function canAddPitch(entry) {
   return Boolean(entry) && entry.type === 'note';
 }
 
-// notes配列のindex位置のエントリに(string, fret)を追加する。
-// 既に同じ弦が使われている場合、同じフレットなら除去(最低1音は残す)、異なるフレットなら何もしない
-// (1本の弦は同時に1音までのため)。ピッチ構成が変わることで、直前のエントリからこのエントリへの
-// articulationが無効になる場合(タイなら和音同士でもvoicingが一致しなくなった、それ以外は
-// 単音同士専用なので和音化した時点で常に無効)はクリアする
-export function addPitchToEntry(notes, index, pitch) {
+// articulationは「このエントリから次のエントリへの連結」を表すため、ピッチ構成が変わったら
+// 成立条件を満たすか再評価する。ハンマリング/プリングはフレットの上下で種別が決まるので、
+// 差し替えで向きが逆転した場合はクリアせず種別を付け替える
+function reevaluateArticulation(notes, index, tuning) {
+  const entry = notes[index];
+  if (!entry || !isArticulation(entry.articulation)) return entry;
+
+  if (entry.articulation === 'tie') {
+    return canTie(notes, index) ? entry : { ...entry, articulation: null };
+  }
+  if (entry.articulation === 'slide') {
+    return canSlide(notes, index, tuning) ? entry : { ...entry, articulation: null };
+  }
+  if (!canHammerPull(notes, index)) return { ...entry, articulation: null };
+  const type = notes[index + 1].notes[0].fret > entry.notes[0].fret ? 'hammerOn' : 'pullOff';
+  return type === entry.articulation ? entry : { ...entry, articulation: type };
+}
+
+// notes配列のindex位置のエントリに(string, fret)を追加する。既に同じ弦が使われている場合、
+// 同じフレットなら除去(最低1音は残す)、異なるフレットならその弦のフレットを差し替える
+// (1本の弦は同時に1音までのため。貼り付けた和音の一音だけを直す・入力済みの音符のフレットを
+// 修正する手段を兼ねる)。差し替えではゴースト属性は元のまま維持する
+export function addPitchToEntry(notes, index, pitch, tuning) {
   const entry = notes[index];
   if (!canAddPitch(entry)) return notes;
 
@@ -162,23 +179,15 @@ export function addPitchToEntry(notes, index, pitch) {
     if (entry.notes.length === 1) return notes;
     nextPitches = entry.notes.filter((_, pi) => pi !== existingIdx);
   } else {
-    return notes;
+    nextPitches = entry.notes.map((p, pi) => (pi === existingIdx ? { ...p, fret: pitch.fret } : p));
   }
 
-  const updatedEntry = {
-    ...entry,
-    notes: nextPitches,
-    articulation: nextPitches.length > 1 ? null : entry.articulation,
-  };
-
-  return notes.map((n, i) => {
-    if (i === index) return updatedEntry;
-    if (i === index - 1 && isArticulation(n.articulation)) {
-      const stillTied = n.articulation === 'tie' && sameVoicing(n, updatedEntry);
-      if (!stillTied) return { ...n, articulation: null };
-    }
-    return n;
-  });
+  const updated = notes.map((n, i) => (i === index ? { ...entry, notes: nextPitches } : n));
+  // ピッチ構成が変わると、このエントリから次への連結と、直前のエントリからこのエントリへの
+  // 連結の双方が成立しなくなることがあるため、両方を再評価する
+  return updated.map((n, i) =>
+    i === index - 1 || i === index ? reevaluateArticulation(updated, i, tuning) : n
+  );
 }
 
 // 既存の複数音符を1つの和音エントリへ統合できるか。条件: 2音符以上・全てtype: "note"・

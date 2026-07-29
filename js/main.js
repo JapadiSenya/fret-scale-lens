@@ -493,11 +493,17 @@ function handleFretboardNoteInput(stringIndex, fret) {
     tabSelection && tabSelection.start === tabSelection.end ? tabSelection.start : undefined;
   const isGhost = pendingInputMode === 'ghost';
 
-  // 和音入力モード中、単一の音符を選択していれば新規挿入せずそのエントリにピッチを追加する。
+  // 和音入力モード中、単一の音符を選択していれば新規挿入せずそのエントリにピッチを追加する
+  // (既に音がある弦なら、同じフレットで除去・異なるフレットで差し替え)。
   // ghostは弦(ピッチ)ごとの属性なので、既存の和音に通常のフレット音とミュート弦を混在させられる
   if (chordInputMode && singleSelected !== undefined && canAddPitch(tabData.notes[singleSelected])) {
     commitTab({
-      notes: addPitchToEntry(tabData.notes, singleSelected, { string: stringIndex, fret, ghost: isGhost }),
+      notes: addPitchToEntry(
+        tabData.notes,
+        singleSelected,
+        { string: stringIndex, fret, ghost: isGhost },
+        tabData.tuning
+      ),
     });
     if (isGhost) {
       pendingInputMode = 'note';
