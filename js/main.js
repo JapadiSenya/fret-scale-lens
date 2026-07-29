@@ -31,6 +31,8 @@ import {
   removeRange,
   setDurationRange,
   setDottedRange,
+  setStaccatoRange,
+  canStaccato,
   canTie,
   canHammerPull,
   canSlide,
@@ -114,6 +116,7 @@ const tabTitleInput = document.getElementById('tab-title-input');
 const durationButtonsEl = document.getElementById('duration-buttons');
 const tabRestBtn = document.getElementById('tab-rest-btn');
 const tabDottedBtn = document.getElementById('tab-dotted-btn');
+const tabStaccatoBtn = document.getElementById('tab-staccato-btn');
 const tabGhostBtn = document.getElementById('tab-ghost-btn');
 const tabChordBtn = document.getElementById('tab-chord-btn');
 const tabTieBtn = document.getElementById('tab-tie-btn');
@@ -149,6 +152,7 @@ const simultaneousTabIds = new Set(); // 同時再生対象の他TAB id(セッ�
 let tabClipboard = null; // TABをまたいで共有するクリップボード
 let selectedDuration = 'quarter';
 let dottedInput = false;
+let staccatoInput = false; // 次に入力する音符へスタッカートを付けるか(付点と同様に引き継ぐ)
 let pendingInputMode = 'note'; // 'note' | 'ghost'
 let chordInputMode = false; // 有効時、単一選択中のエントリへ指板クリックでピッチを追加する
 // 再生セッション。同時再生では複数トラック(アクティブTAB + 同時再生に選択された他TAB)が
@@ -479,6 +483,11 @@ function syncDottedButton() {
   tabDottedBtn.setAttribute('aria-pressed', String(dottedInput));
 }
 
+function syncStaccatoButton() {
+  tabStaccatoBtn.classList.toggle('active', staccatoInput);
+  tabStaccatoBtn.setAttribute('aria-pressed', String(staccatoInput));
+}
+
 function syncTabLibrary() {
   tabLibrary = { ...tabLibrary, tabs: tabLibrary.tabs.map((t) => (t.id === tabData.id ? tabData : t)) };
   saveTabLibrary(tabLibrary);
@@ -523,6 +532,7 @@ function handleFretboardNoteInput(stringIndex, fret) {
     duration: selectedDuration,
     dotted: dottedInput,
     ghost: isGhost,
+    staccato: staccatoInput,
   });
 
   commitTab({ notes: insertEntry(tabData.notes, entry, singleSelected) });
@@ -1019,6 +1029,20 @@ tabDottedBtn.addEventListener('click', () => {
     commitTab({ notes: setDottedRange(tabData.notes, tabSelection.start, tabSelection.end, dottedInput) });
   }
   syncDottedButton();
+syncStaccatoButton();
+  renderTabView();
+});
+
+// 付点と同じく、次の入力への引き継ぎと選択範囲への一括適用を兼ねる。
+// 休符には発音が無く意味を持たないため、選択範囲のうち音符にのみ適用する
+tabStaccatoBtn.addEventListener('click', () => {
+  staccatoInput = !staccatoInput;
+  if (tabSelection && canStaccato(tabData.notes, tabSelection.start, tabSelection.end)) {
+    commitTab({
+      notes: setStaccatoRange(tabData.notes, tabSelection.start, tabSelection.end, staccatoInput),
+    });
+  }
+  syncStaccatoButton();
   renderTabView();
 });
 

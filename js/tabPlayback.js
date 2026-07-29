@@ -26,6 +26,9 @@ export function playbackStartTime(totalEntries = 0) {
 
 const ATTACK_SECONDS = 0.002;
 const RELEASE_SECONDS = 0.12;
+// スタッカートは音符長(リズム上の位置)を変えずに発音の長さだけを切る。余韻も短くして明確に切る
+const STACCATO_RATIO = 0.5;
+const STACCATO_RELEASE_SECONDS = 0.04;
 const VOICE_PEAK_GAIN = 0.32;
 const GHOST_PEAK_GAIN = 0.22;
 
@@ -34,10 +37,10 @@ const GHOST_PEAK_GAIN = 0.22;
 // 余韻は音符の長さの内側を削るのではなく、音符の終わりから先へ伸ばす。内側を削ると、8分・16分の
 // ような短い音符では「アタックだけ鳴らして即座に消える」形になり、硬い音が連続してしまうため。
 // 余韻の長さは音符の長さで頭打ちにして、速いパッセージが濁らないようにする
-function scheduleEnvelope(gain, startTime, duration, peak = VOICE_PEAK_GAIN) {
+function scheduleEnvelope(gain, startTime, duration, { peak = VOICE_PEAK_GAIN, release = RELEASE_SECONDS } = {}) {
   const attackEnd = startTime + Math.min(ATTACK_SECONDS, duration);
   const noteEnd = startTime + duration;
-  const releaseEnd = noteEnd + Math.max(Math.min(RELEASE_SECONDS, duration), 0.01);
+  const releaseEnd = noteEnd + Math.max(Math.min(release, duration), 0.01);
 
   gain.gain.setValueAtTime(0, startTime);
   gain.gain.linearRampToValueAtTime(peak, attackEnd);
@@ -100,6 +103,22 @@ function groupEntries(notes) {
   return groups;
 }
 
+// グループが実際に発音する長さ(秒)。スタッカートはリズム上の長さを変えずに発音だけを切るため、
+// ここでのみ短くする。タイ等で連結されたグループでは、最後の音符に付いている場合だけ効く
+// (途中の音符は次の音符へ続くため、そこで切ると連結の意味が失われる)
+function soundSeconds(group, secondsPerBeat) {
+  const beats = group.items.reduce((sum, item, i) => {
+    const isLast = i === group.items.length - 1;
+    return sum + getEntryBeats(item) * (isLast && item.staccato ? STACCATO_RATIO : 1);
+  }, 0);
+  return beats * secondsPerBeat;
+}
+
+function releaseSecondsOf(group) {
+  const last = group.items[group.items.length - 1];
+  return last.staccato ? STACCATO_RELEASE_SECONDS : RELEASE_SECONDS;
+}
+
 // stringNum: 発音する弦番号。タイで連結された和音グループは、配列の並び順ではなく弦番号で
 // 対応するピッチを追いかけて1本のOscillatorNodeを継続させる(単音・非タイの和音は常にitems.length===1)。
 // 弦をまたぐスライドでは連結先の弦番号が変わるため、pitchOnStringが単音のフォールバックを返す
@@ -114,7 +133,6 @@ function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat
   const gain = ctx.createGain();
 
   let t = groupStart;
-  let totalDuration = 0;
   group.items.forEach((item, i) => {
     const dur = getEntryBeats(item) * secondsPerBeat;
     const freq = frequencyForPitch(tuning, pitchOnString(item, stringNum), octaveUp);
@@ -128,10 +146,11 @@ function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat
       if (nextFreq != null) source.playbackRate.linearRampToValueAtTime(nextFreq / baseFreq, t + dur);
     }
     t += dur;
-    totalDuration += dur;
   });
 
-  const releaseEnd = scheduleEnvelope(gain, groupStart, totalDuration);
+  const releaseEnd = scheduleEnvelope(gain, groupStart, soundSeconds(group, secondsPerBeat), {
+    release: releaseSecondsOf(group),
+  });
 
   source.connect(gain);
   gain.connect(getMasterGain());

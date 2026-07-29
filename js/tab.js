@@ -68,8 +68,16 @@ export function setActiveTabId(library, tabId) {
 
 // ghost: trueの場合、この弦はミュート/パーカッシブなヒット(✕表示)として扱う。
 // 和音は複数ピッチを持てるため、通常のフレット音とゴースト(ミュート弦)を1つの和音内に混在させられる
-export function createNoteEntry({ string, fret, duration, dotted = false, ghost = false }) {
-  return { type: 'note', notes: [{ string, fret, ghost }], duration, dotted, articulation: null, tuplet: null };
+export function createNoteEntry({ string, fret, duration, dotted = false, ghost = false, staccato = false }) {
+  return {
+    type: 'note',
+    notes: [{ string, fret, ghost }],
+    duration,
+    dotted,
+    staccato,
+    articulation: null,
+    tuplet: null,
+  };
 }
 
 export function createRestEntry(duration, dotted = false) {
@@ -89,6 +97,7 @@ export function migrateEntry(entry) {
     notes: pitches.map((p) => ({ string: p.string, fret: p.fret, ghost: wasGhostEntry || Boolean(p.ghost) })),
     duration: entry.duration,
     dotted: entry.dotted,
+    staccato: Boolean(entry.staccato), // staccatoを持たない旧形式は無効として扱う
     articulation: entry.articulation,
     tuplet: entry.tuplet,
   };
@@ -294,6 +303,19 @@ export function setDurationRange(notes, startIndex, endIndex, duration) {
 export function setDottedRange(notes, startIndex, endIndex, dotted) {
   const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
   return notes.map((n, i) => (i >= from && i <= to ? { ...n, dotted } : n));
+}
+
+// スタッカートは発音しない休符には意味を持たないため、選択範囲のうち音符にのみ適用する
+export function setStaccatoRange(notes, startIndex, endIndex, staccato) {
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  return notes.map((n, i) => (i >= from && i <= to && n.type === 'note' ? { ...n, staccato } : n));
+}
+
+// 選択範囲にスタッカートを適用できるか(音符が1つも無ければ適用先が無い)
+export function canStaccato(notes, startIndex, endIndex) {
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  const range = notes.slice(from, to + 1);
+  return range.length > 0 && range.some((n) => n && n.type === 'note');
 }
 
 // 連符化: 選択範囲(2音符以上、durationが全て同じ)が対象。nは選択範囲の音符数をそのまま使う
