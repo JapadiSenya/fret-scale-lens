@@ -19,7 +19,8 @@ import {
   saveTabLibrary,
   peekLegacyTempoAndTimeSignature,
 } from './storage.js';
-import { playFrequency, setMasterVolume } from './audio.js';
+import { playFrequency, setMasterVolume, getAudioContext, getMasterGain } from './audio.js';
+import { EFFECT_TYPES, EFFECT_PARAMS, createEffect, createEffectChain } from './effects.js';
 import { renderFretboard } from './render.js';
 import {
   DURATION_LIST,
@@ -143,6 +144,12 @@ const tabJsonTextarea = document.getElementById('tab-json-textarea');
 const tabJsonError = document.getElementById('tab-json-error');
 const toastContainer = document.getElementById('toast-container');
 const simulPlayListEl = document.getElementById('simul-play-list');
+const tabEffectsBtn = document.getElementById('tab-effects-btn');
+const effectsDialog = document.getElementById('effects-dialog');
+const effectsListEl = document.getElementById('effects-list');
+const effectsAddSelect = document.getElementById('effects-add-select');
+const effectsAddBtn = document.getElementById('effects-add-btn');
+const effectsCloseBtn = document.getElementById('effects-close-btn');
 
 let tabData = tabLibrary.tabs.find((t) => t.id === tabLibrary.activeTabId) ?? tabLibrary.tabs[0];
 let tabHistory = createHistory(tabData);
@@ -182,6 +189,7 @@ function populateStaticSelects() {
     new Option('カスタム', CUSTOM_PRESET_VALUE)
   );
   newTabPresetSelect.replaceChildren(...TUNING_PRESETS.map((p) => new Option(p.label, p.id)));
+  effectsAddSelect.replaceChildren(...EFFECT_TYPES.map((e) => new Option(e.label, e.id)));
 }
 
 function sameTuning(a, b) {
@@ -237,7 +245,7 @@ function persist() {
 function render() {
   renderFretboard(fretboardContainer, { ...state, tuning: tabData.tuning, fretCount: tabData.fretCount }, {
     onNoteClick: (stringIndex, fret, note) => {
-      playFrequency(frequencyOf(note.name, note.octave));
+      playFrequency(frequencyOf(note.name, note.octave), effectChainFor(tabData));
       handleFretboardNoteInput(stringIndex, fret);
     },
   });
@@ -563,6 +571,119 @@ function handleTabColumnClick(index, event) {
   renderTabView();
 }
 
+// --- エフェクター ---
+
+// TABごとのエフェクトチェーン。設定が変わったときだけ組み直して使い回す
+// (再生のたびに作り直すと、指板クリック音の経路と二重に管理することになるため)
+const effectChains = new Map(); // tabId -> { signature, chain }
+
+function effectChainFor(tab) {
+  const signature = JSON.stringify(tab.effects ?? []);
+  const cached = effectChains.get(tab.id);
+  if (cached && cached.signature === signature) return cached.chain.input;
+
+  cached?.chain.dispose();
+  const chain = createEffectChain(getAudioContext(), tab.effects ?? [], getMasterGain());
+  effectChains.set(tab.id, { signature, chain });
+  return chain.input;
+}
+
+function renderEffectsDialog() {
+  const effects = tabData.effects ?? [];
+  if (effects.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'effects-empty';
+    empty.textContent = 'エフェクトはありません。下の一覧から追加できます。';
+    effectsListEl.replaceChildren(empty);
+    return;
+  }
+
+  effectsListEl.replaceChildren(
+    ...effects.map((effect, index) => {
+      const row = document.createElement('div');
+      row.className = 'effects-item';
+
+      const head = document.createElement('div');
+      head.className = 'effects-item-head';
+
+      const toggle = document.createElement('input');
+      toggle.type = 'checkbox';
+      toggle.checked = effect.enabled !== false;
+      toggle.id = `effect-enabled-${index}`;
+      toggle.addEventListener('change', () => updateEffect(index, { enabled: toggle.checked }));
+
+      const name = document.createElement('label');
+      name.setAttribute('for', toggle.id);
+      name.textContent = EFFECT_TYPES.find((t) => t.id === effect.type)?.label ?? effect.type;
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'effects-remove';
+      removeBtn.textContent = '削除';
+      removeBtn.addEventListener('click', () => removeEffect(index));
+
+      head.append(toggle, name, removeBtn);
+      row.appendChild(head);
+
+      (EFFECT_PARAMS[effect.type] ?? []).forEach((param) => {
+        const line = document.createElement('div');
+        line.className = 'effects-param';
+
+        const label = document.createElement('label');
+        label.textContent = param.label;
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '1';
+        slider.step = '0.01';
+        slider.value = String(effect[param.key] ?? param.defaultValue);
+        label.setAttribute('for', (slider.id = `effect-${index}-${param.key}`));
+
+        const value = document.createElement('span');
+        value.className = 'effects-param-value';
+        value.textContent = Number(slider.value).toFixed(2);
+
+        slider.addEventListener('input', () => {
+          value.textContent = Number(slider.value).toFixed(2);
+          updateEffect(index, { [param.key]: Number(slider.value) }, { rerender: false });
+        });
+
+        line.append(label, slider, value);
+        row.appendChild(line);
+      });
+
+      return row;
+    })
+  );
+}
+
+function commitEffects(effects, { rerender = true } = {}) {
+  commitTab({ effects });
+  if (rerender) renderEffectsDialog();
+  renderTabView();
+}
+
+function updateEffect(index, patch, options) {
+  const effects = (tabData.effects ?? []).map((e, i) => (i === index ? { ...e, ...patch } : e));
+  commitEffects(effects, options);
+}
+
+function removeEffect(index) {
+  commitEffects((tabData.effects ?? []).filter((_, i) => i !== index));
+}
+
+tabEffectsBtn.addEventListener('click', () => {
+  renderEffectsDialog();
+  effectsDialog.showModal();
+});
+
+effectsAddBtn.addEventListener('click', () => {
+  commitEffects([...(tabData.effects ?? []), createEffect(effectsAddSelect.value)]);
+});
+
+effectsCloseBtn.addEventListener('click', () => effectsDialog.close());
+
 // 再生中の全トラックを停止し、UIを停止状態へ戻す
 function stopTabPlayback() {
   const session = playbackSession;
@@ -627,6 +748,7 @@ function startTabPlayback() {
       timeSignature: state.timeSignature,
       octaveUp: state.tabOctaveUp,
       startAt,
+      output: effectChainFor(tab), // TABごとのエフェクトを通す(メトロノームは対象外)
       ...options,
       onEnd: () => finishTrack(session, track),
     });
