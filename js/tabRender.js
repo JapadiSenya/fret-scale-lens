@@ -145,16 +145,28 @@ export function renderTab(
     col.title =
       (DURATION_JA[entry.duration] || '') +
       (entry.dotted ? '(付点)' : '') +
+      (entry.staccato ? '(スタッカート)' : '') +
       (tupletInfo ? `(${tupletInfo.n}連符)` : '');
     col.tabIndex = 0;
     col.setAttribute('role', 'button');
 
+    // 連符のブラケット・数字と、スタッカートの「・」を同じ行(音符長シンボルの上)に置く
     const tupletRow = document.createElement('div');
     tupletRow.className = 'tab-tuplet-row';
     if (tupletInfo) {
       tupletRow.classList.add('tab-tuplet-marked');
       if (!tupletInfo.complete) tupletRow.classList.add('tab-tuplet-incomplete');
-      if (tupletInfo.isLabel) tupletRow.textContent = String(tupletInfo.n);
+      if (tupletInfo.isLabel) {
+        const label = document.createElement('span');
+        label.textContent = String(tupletInfo.n);
+        tupletRow.appendChild(label);
+      }
+    }
+    if (entry.staccato) {
+      const dot = document.createElement('span');
+      dot.className = 'tab-staccato-dot';
+      dot.textContent = '・';
+      tupletRow.appendChild(dot);
     }
     col.appendChild(tupletRow);
 
