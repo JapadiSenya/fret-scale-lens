@@ -34,8 +34,12 @@ function stringCharacter(freq) {
 // ミュート(ゴースト)ピッチ。弦に触れたまま弾いたときのブラッシング音を表す。
 // Karplus-Strongは遅延線が周期を作る構造上、ノイズで励振しても必ず明確な音程が出てしまうため、
 // ミュート音には使わず「減衰の速いノイズ + 弦の音程を薄く感じさせる共振」で作る
-const MUTED_SECONDS = 0.075;
-const MUTED_TONE_CUTOFF = 2000; // 摩擦音の高域を丸めて「チャッ」という鈍い音にする(Hz)
+const MUTED_SECONDS = 0.1;
+// 立ち上がりが速すぎるとブラッシング(擦る音)ではなくクリック(パチッ)になるため、
+// ピックが弦を横切る時間ぶんの緩やかな立ち上がりを持たせる
+const MUTED_ATTACK_SECONDS = 0.007;
+const MUTED_DECAY_FLOOR = 0.02; // 減衰の到達点。小さくするほど頭だけが目立つ鋭い音になる
+const MUTED_TONE_CUTOFF = 1200; // 摩擦音の高域を丸めて「チャッ」という鈍い音にする(Hz)
 const MUTED_RESONANCE_Q = 2; // 共振の鋭さ。上げるほど音程がはっきりする
 const MUTED_RESONANCE_MIX = 0.35; // 共振成分の割合。残りはノイズそのもの
 
@@ -55,10 +59,11 @@ function makeBandpass(sampleRate, freq, q) {
 function renderMutedWave(sampleRate, freq) {
   const length = Math.max(1, Math.floor(sampleRate * MUTED_SECONDS));
   const out = new Float32Array(length);
-  const decayRate = Math.log(0.001) / MUTED_SECONDS;
+  const decayRate = Math.log(MUTED_DECAY_FLOOR) / MUTED_SECONDS;
   const toneCoeff = 1 - Math.exp((-2 * Math.PI * MUTED_TONE_CUTOFF) / sampleRate);
   const bp = makeBandpass(sampleRate, freq, MUTED_RESONANCE_Q);
 
+  let tone1 = 0;
   let tone = 0;
   let x1 = 0;
   let x2 = 0;
@@ -67,11 +72,14 @@ function renderMutedWave(sampleRate, freq) {
   let peak = 0;
   for (let i = 0; i < length; i++) {
     const t = i / sampleRate;
-    // 弦に指が触れる瞬間の摩擦音。立ち上がりだけ滑らかにしてクリックを避ける
-    const attack = Math.min(1, t / 0.001);
+    // 弦を横切る動きに相当する滑らかな立ち上がり(ここが速いとクリック音になる)
+    const attack =
+      t < MUTED_ATTACK_SECONDS ? 0.5 - 0.5 * Math.cos((Math.PI * t) / MUTED_ATTACK_SECONDS) : 1;
     const noise = (Math.random() * 2 - 1) * attack * Math.exp(decayRate * t);
 
-    tone += toneCoeff * (noise - tone);
+    // 一次ローパスを2段重ねて高域の切れを急峻にする(パチッという成分は高域に集中している)
+    tone1 += toneCoeff * (noise - tone1);
+    tone += toneCoeff * (tone1 - tone);
 
     const y = bp.b0 * tone + bp.b2 * x2 - bp.a1 * y1 - bp.a2 * y2;
     x2 = x1;
