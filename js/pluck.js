@@ -31,14 +31,72 @@ function stringCharacter(freq) {
   };
 }
 
-// ミュート(ゴースト)ピッチ。ほぼ減衰音だけが残る短いパーカッシブな音になる
-const MUTED_CHARACTER = {
-  t60: 0.12,
-  pluckPosition: 0.18,
-  noiseAmount: 0.5,
-  loopMix: 0.7,
-  toneCutoff: 3000,
-};
+// ミュート(ゴースト)ピッチ。弦に触れたまま弾いたときのブラッシング音を表す。
+// Karplus-Strongは遅延線が周期を作る構造上、ノイズで励振しても必ず明確な音程が出てしまうため、
+// ミュート音には使わず「減衰の速いノイズ + 弦の音程を薄く感じさせる共振」で作る
+const MUTED_SECONDS = 0.075;
+const MUTED_TONE_CUTOFF = 2000; // 摩擦音の高域を丸めて「チャッ」という鈍い音にする(Hz)
+const MUTED_RESONANCE_Q = 2; // 共振の鋭さ。上げるほど音程がはっきりする
+const MUTED_RESONANCE_MIX = 0.35; // 共振成分の割合。残りはノイズそのもの
+
+// 弦の音程をわずかに感じさせるためのバンドパス(RBJ biquad)
+function makeBandpass(sampleRate, freq, q) {
+  const w0 = (2 * Math.PI * Math.min(freq, sampleRate / 3)) / sampleRate;
+  const alpha = Math.sin(w0) / (2 * q);
+  const a0 = 1 + alpha;
+  return {
+    b0: alpha / a0,
+    b2: -alpha / a0,
+    a1: (-2 * Math.cos(w0)) / a0,
+    a2: (1 - alpha) / a0,
+  };
+}
+
+function renderMutedWave(sampleRate, freq) {
+  const length = Math.max(1, Math.floor(sampleRate * MUTED_SECONDS));
+  const out = new Float32Array(length);
+  const decayRate = Math.log(0.001) / MUTED_SECONDS;
+  const toneCoeff = 1 - Math.exp((-2 * Math.PI * MUTED_TONE_CUTOFF) / sampleRate);
+  const bp = makeBandpass(sampleRate, freq, MUTED_RESONANCE_Q);
+
+  let tone = 0;
+  let x1 = 0;
+  let x2 = 0;
+  let y1 = 0;
+  let y2 = 0;
+  let peak = 0;
+  for (let i = 0; i < length; i++) {
+    const t = i / sampleRate;
+    // 弦に指が触れる瞬間の摩擦音。立ち上がりだけ滑らかにしてクリックを避ける
+    const attack = Math.min(1, t / 0.001);
+    const noise = (Math.random() * 2 - 1) * attack * Math.exp(decayRate * t);
+
+    tone += toneCoeff * (noise - tone);
+
+    const y = bp.b0 * tone + bp.b2 * x2 - bp.a1 * y1 - bp.a2 * y2;
+    x2 = x1;
+    x1 = tone;
+    y2 = y1;
+    y1 = y;
+
+    const sample = tone * (1 - MUTED_RESONANCE_MIX) + y * MUTED_RESONANCE_MIX;
+    out[i] = sample;
+    const abs = Math.abs(sample);
+    if (abs > peak) peak = abs;
+  }
+
+  if (peak > 0) {
+    const scale = 1 / peak;
+    for (let i = 0; i < length; i++) out[i] *= scale;
+  }
+
+  const fadeSamples = Math.min(Math.floor(sampleRate * FADE_OUT_SECONDS), length);
+  for (let i = 0; i < fadeSamples; i++) {
+    out[length - fadeSamples + i] *= 1 - i / fadeSamples;
+  }
+
+  return out;
+}
 
 /**
  * Karplus-Strongで1音分の波形を生成する。
@@ -129,8 +187,9 @@ export function getPluckBuffer(ctx, freq, muted = false) {
   const cached = bufferCache.get(key);
   if (cached) return cached;
 
-  const character = muted ? MUTED_CHARACTER : stringCharacter(freq);
-  const wave = renderPluckWave(ctx.sampleRate, freq, character);
+  const wave = muted
+    ? renderMutedWave(ctx.sampleRate, freq)
+    : renderPluckWave(ctx.sampleRate, freq, stringCharacter(freq));
   const buffer = ctx.createBuffer(1, wave.length, ctx.sampleRate);
   buffer.copyToChannel(wave, 0);
   bufferCache.set(key, buffer);
