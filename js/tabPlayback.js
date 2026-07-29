@@ -6,6 +6,10 @@ import { getPluckBuffer } from './pluck.js';
 import { getEntryBeats, parseTimeSignature } from './tab.js';
 
 const LOOKAHEAD_PAD = 0.05;
+// 先読みスケジューリングの窓。バックグラウンドタブではsetIntervalが1秒程度まで間引かれるため、
+// それを吸収できる長さを取る(音声再生中のタブはそれ以上の間引き対象からは外れる)
+const SCHEDULE_AHEAD_SECONDS = 2.5;
+const SCHEDULER_INTERVAL_MS = 400;
 // 1エントリあたりのスケジューリング所要時間の目安(実測でおよそ0.07ms/エントリ)。音符数の多い
 // 譜面では`OscillatorNode`の生成だけで100ms以上かかるため、その分を見越して開始時刻に余裕を
 // 持たせないと、予約し終える前に開始時刻を過ぎてしまい冒頭の音が詰まって鳴る
@@ -156,7 +160,7 @@ function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat
   gain.connect(getMasterGain());
   source.start(groupStart);
   source.stop(releaseEnd + 0.02);
-  activeNodes.push({ osc: source, gain });
+  activeNodes.push({ osc: source, gain, endsAt: releaseEnd + 0.02 });
 }
 
 // ゴースト(ミュート)ピッチ1音分を、通知された長さに関わらず短いパーカッシブな減衰で発音する。
@@ -177,7 +181,7 @@ function scheduleGhostPitch(ctx, tuning, pitch, startTime, activeNodes, octaveUp
   gain.connect(getMasterGain());
   source.start(startTime);
   source.stop(endTime + 0.02);
-  activeNodes.push({ osc: source, gain });
+  activeNodes.push({ osc: source, gain, endsAt: endTime + 0.02 });
 }
 
 const CLICK_ATTACK_SECONDS = 0.004;
@@ -233,7 +237,7 @@ function scheduleMetronome(ctx, tempo, beatsPerMeasure, startTime, endTime, acti
   gain.connect(getMasterGain());
   source.start(startTime);
   source.stop(endTime);
-  activeNodes.push({ osc: source, gain });
+  activeNodes.push({ osc: source, gain, endsAt: endTime });
 }
 
 /**
@@ -281,22 +285,25 @@ export function playTab(
   // 同時再生では全トラックで共通の開始時刻(`playbackStartTime`)を受け取り、トラック間のずれを防ぐ
   const startTime = startAt ?? ctx.currentTime + LOOKAHEAD_PAD;
 
-  const activeNodes = [];
-  const timers = [];
+  let activeNodes = [];
+  let timers = [];
   // startIndexより前を除外して再生する。タイ/ハンマリング等の連結途中から始まる場合は
   // 単独の音符として扱う(直前の音が鳴らないため自然な挙動)
   const notesToPlay = tabData.notes.slice(startIndex);
   const groups = groupEntries(notesToPlay);
 
-  let t = startTime;
-  groups.forEach((group) => {
-    const groupStart = t;
-    const totalDuration = group.items.reduce(
-      (sum, item) => sum + getEntryBeats(item) * secondsPerBeat,
-      0
-    );
-    const first = group.items[0];
+  // 各グループの開始時刻を先に算出しておく(ここではノードを作らない)。
+  // 実際のノード生成は再生の進行に合わせて少しずつ行う
+  let cursor = startTime;
+  const plan = groups.map((group) => {
+    const groupStart = cursor;
+    cursor += group.items.reduce((sum, item) => sum + getEntryBeats(item) * secondsPerBeat, 0);
+    return { group, groupStart };
+  });
+  const totalEndTime = cursor;
 
+  function scheduleGroup({ group, groupStart }) {
+    const first = group.items[0];
     if (first.type === 'note') {
       // ゴースト(ミュート)ピッチと通常のフレット音が1つの和音に混在する場合があるため、
       // ピッチごとに振り分けて発音する(ゴーストはグループ化されない=常にitems.length===1)
@@ -318,12 +325,34 @@ export function playTab(
         subT += getEntryBeats(item) * secondsPerBeat;
       });
     }
+  }
 
-    t += totalDuration;
-  });
+  // 直近SCHEDULE_AHEAD_SECONDS秒ぶんだけを予約し、鳴り終わったノードは参照を手放す。
+  // 曲の全音符を最初にまとめて予約すると、接続済みノードは発音中かどうかに関わらず
+  // オーディオスレッドで毎レンダー処理されるため、長い曲・同時再生で処理落ちする
+  let nextIndex = 0;
+  let schedulerId = null;
 
-  const totalEndTime = t;
+  function pump() {
+    const until = ctx.currentTime + SCHEDULE_AHEAD_SECONDS;
+    while (nextIndex < plan.length && plan[nextIndex].groupStart < until) {
+      scheduleGroup(plan[nextIndex]);
+      nextIndex += 1;
+    }
+    const now = ctx.currentTime;
+    activeNodes = activeNodes.filter((n) => n.endsAt > now);
+    if (nextIndex >= plan.length && schedulerId !== null) {
+      clearInterval(schedulerId);
+      schedulerId = null;
+    }
+  }
 
+  pump(); // 冒頭ぶんはこの場で予約する(開始時刻が目前のため待てない)
+  if (nextIndex < plan.length) {
+    schedulerId = setInterval(pump, SCHEDULER_INTERVAL_MS);
+  }
+
+  // メトロノームは1小節分をループする1ノードのみなので、曲の長さに関わらず先に予約してよい
   if (metronome && totalEndTime > startTime) {
     scheduleMetronome(ctx, tempo, beatsPerMeasure, startTime, totalEndTime, activeNodes);
   }
@@ -335,6 +364,11 @@ export function playTab(
 
   return {
     stop() {
+      if (schedulerId !== null) {
+        clearInterval(schedulerId);
+        schedulerId = null;
+      }
+      nextIndex = plan.length; // 保留中のpumpが走っても以後は何も予約しない
       const now = ctx.currentTime;
       activeNodes.forEach(({ osc, gain }) => {
         try {
@@ -346,7 +380,9 @@ export function playTab(
           // 既に停止済みのノードは無視する
         }
       });
+      activeNodes = [];
       timers.forEach(clearTimeout);
+      timers = [];
     },
   };
 }
