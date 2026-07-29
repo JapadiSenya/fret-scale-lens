@@ -5,6 +5,23 @@ import { getAudioContext, getMasterGain } from './audio.js';
 import { getEntryBeats, parseTimeSignature } from './tab.js';
 
 const LOOKAHEAD_PAD = 0.05;
+// 1エントリあたりのスケジューリング所要時間の目安(実測でおよそ0.07ms/エントリ)。音符数の多い
+// 譜面では`OscillatorNode`の生成だけで100ms以上かかるため、その分を見越して開始時刻に余裕を
+// 持たせないと、予約し終える前に開始時刻を過ぎてしまい冒頭の音が詰まって鳴る
+const SCHEDULING_SECONDS_PER_ENTRY = 0.0001;
+const MAX_LOOKAHEAD_PAD = 0.4;
+
+/**
+ * 同時再生する全トラックで共有する再生開始時刻(AudioContextの時刻)を返す。
+ * トラックごとに`playTab`の中で`ctx.currentTime`を読むと、先に予約したトラックの
+ * スケジューリングに要した時間だけ後続のトラックが遅れて鳴り出してしまうため、
+ * セッション全体で1つの基準時刻を共有する
+ * @param {number} totalEntries セッション全体で予約する音符・休符の総数
+ */
+export function playbackStartTime(totalEntries = 0) {
+  const pad = Math.min(LOOKAHEAD_PAD + totalEntries * SCHEDULING_SECONDS_PER_ENTRY, MAX_LOOKAHEAD_PAD);
+  return getAudioContext().currentTime + pad;
+}
 
 const ATTACK_SECONDS = 0.01;
 const INITIAL_DECAY_SECONDS = 0.08;
@@ -163,17 +180,27 @@ export function scheduleClick(time, accent, activeNodes) {
 /**
  * @param {object} tabData
  * @param {{name:string, octave:number}[]} tuning
- * @param {{tempo?: number, timeSignature?: string, metronome?: boolean, octaveUp?: boolean, startIndex?: number, onNoteStart?: (index:number) => void, onEnd?: () => void}} [options]
+ * @param {{tempo?: number, timeSignature?: string, metronome?: boolean, octaveUp?: boolean, startIndex?: number, startAt?: number, onNoteStart?: (index:number) => void, onEnd?: () => void}} [options]
  */
 export function playTab(
   tabData,
   tuning,
-  { tempo = 120, timeSignature = '4/4', metronome = false, octaveUp = false, startIndex = 0, onNoteStart, onEnd } = {}
+  {
+    tempo = 120,
+    timeSignature = '4/4',
+    metronome = false,
+    octaveUp = false,
+    startIndex = 0,
+    startAt,
+    onNoteStart,
+    onEnd,
+  } = {}
 ) {
   const ctx = getAudioContext();
   const secondsPerBeat = 60 / tempo;
   const { beatsPerMeasure } = parseTimeSignature(timeSignature);
-  const startTime = ctx.currentTime + LOOKAHEAD_PAD;
+  // 同時再生では全トラックで共通の開始時刻(`playbackStartTime`)を受け取り、トラック間のずれを防ぐ
+  const startTime = startAt ?? ctx.currentTime + LOOKAHEAD_PAD;
 
   const activeNodes = [];
   const timers = [];

@@ -60,7 +60,7 @@ import {
   legacyTimeSignatureOf,
 } from './tab.js';
 import { renderTab, setPlayingColumn, getColumnElement } from './tabRender.js';
-import { playTab } from './tabPlayback.js';
+import { playTab, playbackStartTime } from './tabPlayback.js';
 
 const OCTAVE_OPTIONS = [0, 1, 2, 3, 4, 5, 6];
 const CUSTOM_PRESET_VALUE = 'custom';
@@ -575,6 +575,19 @@ function startTabPlayback() {
   const startIndex = tabSelection ? Math.min(tabSelection.start, tabSelection.end) : 0;
   const targetBeats = beatsBeforeIndex(tabData.notes, startIndex);
 
+  // 実際に鳴らすトラック(アクティブTAB + 開始位置が譜面内に収まる他TAB)
+  const plan = [{ tab: tabData, isActive: true, from: startIndex }];
+  others.forEach((otherTab) => {
+    const otherStartIndex = indexAtBeats(otherTab.notes, targetBeats);
+    if (otherStartIndex >= otherTab.notes.length) return; // この時点で既に演奏が終わっているTABは再生しない
+    plan.push({ tab: otherTab, isActive: false, from: otherStartIndex });
+  });
+
+  // 全トラックで開始時刻を共有する。トラックごとに再生開始時にその場の時刻を読むと、
+  // 先に予約したトラックのスケジューリングに要した時間だけ後続が遅れて鳴り出す
+  // (音符数の多いTABをアクティブにしたときほど、他TABの遅れが大きくなる)
+  const startAt = playbackStartTime(plan.reduce((sum, p) => sum + (p.tab.notes.length - p.from), 0));
+
   const session = { tracks: [], pending: 0 };
   // スケジューリング途中で例外が起きても、それまでに鳴り始めたトラックを停止できるよう
   // 先にセッションを保持しておく(停止手段を失った音が残ると次の再生と重なってしまう)
@@ -588,25 +601,25 @@ function startTabPlayback() {
       tempo: state.tempo,
       timeSignature: state.timeSignature,
       octaveUp: state.tabOctaveUp,
+      startAt,
       ...options,
       onEnd: () => finishTrack(session, track),
     });
   }
 
   try {
-    addTrack(tabData, true, {
-      metronome: state.tabMetronome,
-      startIndex,
-      onNoteStart: (index) => {
-        if (session !== playbackSession) return;
-        updatePlayingIndex(index);
-      },
-    });
-
-    others.forEach((otherTab) => {
-      const otherStartIndex = indexAtBeats(otherTab.notes, targetBeats);
-      if (otherStartIndex >= otherTab.notes.length) return; // この時点で既に演奏が終わっているTABは再生しない
-      addTrack(otherTab, false, { metronome: false, startIndex: otherStartIndex });
+    plan.forEach(({ tab, isActive, from }) => {
+      addTrack(tab, isActive, {
+        // メトロノームは(ONの場合)アクティブTAB分の1系統のみ鳴らす
+        metronome: isActive && state.tabMetronome,
+        startIndex: from,
+        onNoteStart: isActive
+          ? (index) => {
+              if (session !== playbackSession) return;
+              updatePlayingIndex(index);
+            }
+          : undefined,
+      });
     });
   } catch (error) {
     console.error(error);
