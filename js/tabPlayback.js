@@ -30,6 +30,9 @@ export function playbackStartTime(totalEntries = 0) {
 
 const ATTACK_SECONDS = 0.002;
 const RELEASE_SECONDS = 0.12;
+// チョーキングを上げ切るまでの時間。音符の長さに比例させつつ、長い音符で上がり続けないよう頭打ちにする
+const BEND_TIME_RATIO = 0.4;
+const BEND_MAX_SECONDS = 0.18;
 // スタッカートは音符長(リズム上の位置)を変えずに発音の長さだけを切る。余韻も短くして明確に切る
 const STACCATO_RATIO = 0.5;
 const STACCATO_RELEASE_SECONDS = 0.04;
@@ -128,7 +131,7 @@ function releaseSecondsOf(group) {
 // stringNum: 発音する弦番号。タイで連結された和音グループは、配列の並び順ではなく弦番号で
 // 対応するピッチを追いかけて1本のOscillatorNodeを継続させる(単音・非タイの和音は常にitems.length===1)。
 // 弦をまたぐスライドでは連結先の弦番号が変わるため、pitchOnStringが単音のフォールバックを返す
-function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat, activeNodes, octaveUp) {
+function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat, activeNodes, octaveUp, output) {
   // 波形は撥弦した瞬間の音高で生成し、以降のピッチ変化(スライド・ハンマリング/プリング)は
   // 再生速度で表現する。存在しない弦を参照している音は周波数を決められないため鳴らさない
   const baseFreq = frequencyForPitch(tuning, pitchOnString(group.items[0], stringNum), octaveUp);
@@ -139,17 +142,27 @@ function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat
   const gain = ctx.createGain();
 
   let t = groupStart;
+  // 一度上げたチョーキングはグループの終わりまで保つ(押さえたまま次の音へ繋がるため)
+  let bendRatio = 1;
   group.items.forEach((item, i) => {
     const dur = getEntryBeats(item) * secondsPerBeat;
     const freq = frequencyForPitch(tuning, pitchOnString(item, stringNum), octaveUp);
     const prevItem = group.items[i - 1];
     if (freq != null && (!prevItem || prevItem.articulation !== 'slide')) {
-      source.playbackRate.setValueAtTime(freq / baseFreq, t);
+      source.playbackRate.setValueAtTime((freq / baseFreq) * bendRatio, t);
+    }
+    if (item.bend && freq != null) {
+      // 弦を押し上げるのにかかる時間ぶんかけて上げ切る(長い音符でも上がり続けないよう上限を設ける)
+      bendRatio = Math.pow(2, item.bend / 12);
+      const bendTime = Math.min(dur * BEND_TIME_RATIO, BEND_MAX_SECONDS);
+      source.playbackRate.linearRampToValueAtTime((freq / baseFreq) * bendRatio, t + bendTime);
     }
     const nextItem = group.items[i + 1];
     if (item.articulation === 'slide' && nextItem) {
       const nextFreq = frequencyForPitch(tuning, pitchOnString(nextItem, stringNum), octaveUp);
-      if (nextFreq != null) source.playbackRate.linearRampToValueAtTime(nextFreq / baseFreq, t + dur);
+      if (nextFreq != null) {
+        source.playbackRate.linearRampToValueAtTime((nextFreq / baseFreq) * bendRatio, t + dur);
+      }
     }
     t += dur;
   });
@@ -159,7 +172,7 @@ function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat
   });
 
   source.connect(gain);
-  gain.connect(getMasterGain());
+  gain.connect(output);
   source.start(groupStart);
   source.stop(releaseEnd + 0.02);
   activeNodes.push({ osc: source, gain, endsAt: releaseEnd + 0.02 });
@@ -167,7 +180,7 @@ function scheduleVoice(ctx, tuning, group, stringNum, groupStart, secondsPerBeat
 
 // ゴースト(ミュート)ピッチ1音分を、通知された長さに関わらず短いパーカッシブな減衰で発音する。
 // 減衰は波形側(ミュート用に減衰時間を極端に短くしたもの)に含まれている
-function scheduleGhostPitch(ctx, tuning, pitch, startTime, activeNodes, octaveUp) {
+function scheduleGhostPitch(ctx, tuning, pitch, startTime, activeNodes, octaveUp, output) {
   const freq = frequencyForPitch(tuning, pitch, octaveUp);
   if (freq == null) return; // 存在しない弦を参照している音は鳴らさない
 
@@ -180,7 +193,7 @@ function scheduleGhostPitch(ctx, tuning, pitch, startTime, activeNodes, octaveUp
   gain.gain.linearRampToValueAtTime(GHOST_PEAK_GAIN, startTime + ATTACK_SECONDS);
 
   source.connect(gain);
-  gain.connect(getMasterGain());
+  gain.connect(output);
   source.start(startTime);
   source.stop(endTime + 0.02);
   activeNodes.push({ osc: source, gain, endsAt: endTime + 0.02 });
@@ -265,7 +278,7 @@ export function warmUpVoices(tabData, tuning, { octaveUp = false, startIndex = 0
 /**
  * @param {object} tabData
  * @param {{name:string, octave:number}[]} tuning
- * @param {{tempo?: number, timeSignature?: string, metronome?: boolean, octaveUp?: boolean, startIndex?: number, startAt?: number, onNoteStart?: (index:number) => void, onEnd?: () => void}} [options]
+ * @param {{tempo?: number, timeSignature?: string, metronome?: boolean, octaveUp?: boolean, startIndex?: number, startAt?: number, output?: AudioNode, onNoteStart?: (index:number) => void, onEnd?: () => void}} [options]
  */
 export function playTab(
   tabData,
@@ -277,11 +290,15 @@ export function playTab(
     octaveUp = false,
     startIndex = 0,
     startAt,
+    output,
     onNoteStart,
     onEnd,
   } = {}
 ) {
   const ctx = getAudioContext();
+  // このTABのエフェクトチェーンへ送る(未指定ならマスターへ直結)。
+  // メトロノームは楽器音ではないため、チェーンを通さずマスターへ送る
+  const voiceOutput = output ?? getMasterGain();
   const secondsPerBeat = 60 / tempo;
   const { beatsPerMeasure } = parseTimeSignature(timeSignature);
   // 同時再生では全トラックで共通の開始時刻(`playbackStartTime`)を受け取り、トラック間のずれを防ぐ
@@ -311,9 +328,9 @@ export function playTab(
       // ピッチごとに振り分けて発音する(ゴーストはグループ化されない=常にitems.length===1)
       first.notes.forEach((pitch) => {
         if (pitch.ghost) {
-          scheduleGhostPitch(ctx, tuning, pitch, groupStart, activeNodes, octaveUp);
+          scheduleGhostPitch(ctx, tuning, pitch, groupStart, activeNodes, octaveUp, voiceOutput);
         } else {
-          scheduleVoice(ctx, tuning, group, pitch.string, groupStart, secondsPerBeat, activeNodes, octaveUp);
+          scheduleVoice(ctx, tuning, group, pitch.string, groupStart, secondsPerBeat, activeNodes, octaveUp, voiceOutput);
         }
       });
     }

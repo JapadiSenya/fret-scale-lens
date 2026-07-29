@@ -49,8 +49,9 @@ export function getMasterVolume() {
 
 const PEAK_GAIN = 0.32;
 
-// 指板クリック音。TAB再生と同じKarplus-Strongの撥弦音で鳴らす(減衰は波形自体に含まれる)
-export function playFrequency(freq) {
+// 指板クリック音。TAB再生と同じKarplus-Strongの撥弦音で鳴らす(減衰は波形自体に含まれる)。
+// outputにアクティブTABのエフェクトチェーンを渡すと、その場で鳴らしている楽器の音として聞こえる
+export function playFrequency(freq, output) {
   const ctx = getAudioContext();
   const now = ctx.currentTime;
 
@@ -63,7 +64,7 @@ export function playFrequency(freq) {
   gain.gain.linearRampToValueAtTime(PEAK_GAIN, now + 0.002);
 
   source.connect(gain);
-  gain.connect(getMasterGain());
+  gain.connect(output ?? getMasterGain());
 
   source.start(now);
   source.stop(now + source.buffer.duration + 0.02);

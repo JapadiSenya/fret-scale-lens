@@ -1,6 +1,6 @@
 // TAB譜表示エリアのDOM描画
 
-import { computeMeasures, computeTupletGroups } from './tab.js';
+import { computeMeasures, computeTupletGroups, bendMarkOf } from './tab.js';
 import { NOTE_NAMES, noteAtFret } from './notes.js';
 import { isRootNote, isInScale, getDegreeInfo } from './scales.js';
 
@@ -18,6 +18,8 @@ const DURATION_SYMBOL = {
   '8th': '𝅘𝅥𝅮',
   '16th': '𝅘𝅥𝅯',
 };
+
+const BEND_LABEL = { 0.5: '1/4', 1: '半音', 2: '全音' };
 
 const DURATION_JA = {
   whole: '全音符',
@@ -146,6 +148,7 @@ export function renderTab(
       (DURATION_JA[entry.duration] || '') +
       (entry.dotted ? '(付点)' : '') +
       (entry.staccato ? '(スタッカート)' : '') +
+      (entry.bend ? `(チョーキング ${BEND_LABEL[entry.bend] || ''})` : '') +
       (tupletInfo ? `(${tupletInfo.n}連符)` : '');
     col.tabIndex = 0;
     col.setAttribute('role', 'button');
@@ -167,6 +170,13 @@ export function renderTab(
       dot.className = 'tab-staccato-dot';
       dot.textContent = '・';
       tupletRow.appendChild(dot);
+    }
+    const bendMark = bendMarkOf(entry);
+    if (bendMark) {
+      const mark = document.createElement('span');
+      mark.className = 'tab-bend-mark';
+      mark.textContent = bendMark;
+      tupletRow.appendChild(mark);
     }
     col.appendChild(tupletRow);
 

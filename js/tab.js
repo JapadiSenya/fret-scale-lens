@@ -2,6 +2,7 @@
 
 import { toAbsoluteSemitone } from './notes.js';
 import { TUNING_PRESETS, DEFAULT_FRET_COUNT } from './tuning.js';
+import { normalizeEffects } from './effects.js';
 
 export const DURATION_BEATS = {
   whole: 4,
@@ -33,6 +34,7 @@ export function createTabData(overrides = {}) {
     partName: 'パート未設定',
     tuning: TUNING_PRESETS[0].strings.map((s) => ({ ...s })),
     fretCount: DEFAULT_FRET_COUNT,
+    effects: [],
     notes: [],
     ...overrides,
   };
@@ -75,6 +77,7 @@ export function createNoteEntry({ string, fret, duration, dotted = false, ghost 
     duration,
     dotted,
     staccato,
+    bend: null,
     articulation: null,
     tuplet: null,
   };
@@ -98,6 +101,7 @@ export function migrateEntry(entry) {
     duration: entry.duration,
     dotted: entry.dotted,
     staccato: Boolean(entry.staccato), // staccatoを持たない旧形式は無効として扱う
+    bend: BEND_SEMITONES.includes(entry.bend) ? entry.bend : null,
     articulation: entry.articulation,
     tuplet: entry.tuplet,
   };
@@ -134,6 +138,7 @@ export function migrateTabData(tabData, fallback = {}) {
     partName,
     tuning: tuning.map((s) => ({ ...s })),
     fretCount,
+    effects: normalizeEffects(tabData.effects), // effectsを持たない旧形式は空配列になる
     notes: (tabData.notes || []).map(migrateEntry),
   };
 }
@@ -303,6 +308,24 @@ export function setDurationRange(notes, startIndex, endIndex, duration) {
 export function setDottedRange(notes, startIndex, endIndex, dotted) {
   const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
   return notes.map((n, i) => (i >= from && i <= to ? { ...n, dotted } : n));
+}
+
+// チョーキングの上げ幅(半音単位)。ギターの記譜に合わせ、1/4音・半音・全音の3種類を扱う
+export const BEND_OPTIONS = [
+  { semitones: 0.5, label: '1/4', mark: 'b¼' },
+  { semitones: 1, label: '半音', mark: 'b½' },
+  { semitones: 2, label: '全音', mark: 'b1' },
+];
+const BEND_SEMITONES = BEND_OPTIONS.map((o) => o.semitones);
+
+export function bendMarkOf(entry) {
+  return BEND_OPTIONS.find((o) => o.semitones === entry?.bend)?.mark ?? '';
+}
+
+// チョーキングは音程を持たない休符には意味を持たないため、選択範囲のうち音符にのみ適用する
+export function setBendRange(notes, startIndex, endIndex, bend) {
+  const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  return notes.map((n, i) => (i >= from && i <= to && n.type === 'note' ? { ...n, bend } : n));
 }
 
 // スタッカートは発音しない休符には意味を持たないため、選択範囲のうち音符にのみ適用する
