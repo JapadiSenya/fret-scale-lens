@@ -59,7 +59,7 @@ import {
   legacyTempoOf,
   legacyTimeSignatureOf,
 } from './tab.js';
-import { renderTab } from './tabRender.js';
+import { renderTab, setPlayingColumn, getColumnElement } from './tabRender.js';
 import { playTab } from './tabPlayback.js';
 
 const OCTAVE_OPTIONS = [0, 1, 2, 3, 4, 5, 6];
@@ -599,8 +599,7 @@ function startTabPlayback() {
       startIndex,
       onNoteStart: (index) => {
         if (session !== playbackSession) return;
-        playingIndex = index;
-        renderTabView();
+        updatePlayingIndex(index);
       },
     });
 
@@ -636,8 +635,7 @@ function finishTrack(session, track) {
 
   // アクティブTAB自身の演奏だけが終わった場合は、再生位置ハイライトを消して他TABの再生を続ける
   if (track.isActive) {
-    playingIndex = null;
-    renderTabView();
+    updatePlayingIndex(null);
   }
 }
 
@@ -712,9 +710,18 @@ function scrollTabIntoView() {
   const isPlaying = playingIndex != null;
   const focusIndex = playingIndex ?? (tabSelection ? tabSelection.end : tabData.notes.length - 1);
   if (focusIndex == null || focusIndex < 0) return;
-  const col = tabDisplay.querySelectorAll('.tab-col')[focusIndex];
   // 再生中は先の音符を見越しやすいよう、再生中の音符を表示エリアの中央に寄せる
-  col?.scrollIntoView({ inline: isPlaying ? 'center' : 'nearest', block: 'nearest' });
+  getColumnElement(focusIndex)?.scrollIntoView({ inline: isPlaying ? 'center' : 'nearest', block: 'nearest' });
+}
+
+// 再生位置の移動。音符ごとにTAB表示エリア全体を作り直すと、音符数の多い譜面では1音ごとに
+// 数千要素の再生成が走って再生中の操作を受け付けられなくなるため、実際に変化する
+// 「ハイライトされる列」「スクロール位置」「JSON編集エリアの選択範囲」だけを更新する
+function updatePlayingIndex(index) {
+  playingIndex = index;
+  setPlayingColumn(index);
+  scrollTabIntoView();
+  syncTabJsonPlayingRange();
 }
 
 // --- JSON直接編集 ---
@@ -807,9 +814,28 @@ function setTabJsonError(message) {
   tabJsonError.classList.toggle('visible', Boolean(message));
 }
 
-// テキストエリア内でrangeStartを含む行の先頭が一番上に来るようスクロールする
-function scrollTabJsonToOffset(text, offset) {
-  const lineIndex = (text.slice(0, offset).match(/\n/g) || []).length;
+// 表示中のJSONテキストに対する音符ごとの文字範囲と行番号。テキストを組み立て直したときだけ
+// 作り直し、再生位置の移動では使い回す(1音ごとに数十万文字を走査し直さないため)
+let tabJsonRanges = [];
+let tabJsonLineOfRange = [];
+
+function cacheTabJsonRanges(text) {
+  tabJsonRanges = computeNoteJsonRanges(text);
+  // 各範囲の開始オフセットが何行目かを、テキスト1回の走査でまとめて求める
+  tabJsonLineOfRange = [];
+  let line = 0;
+  let cursor = 0;
+  tabJsonRanges.forEach(([start], i) => {
+    while (cursor < start) {
+      if (text.charCodeAt(cursor) === 10) line++;
+      cursor++;
+    }
+    tabJsonLineOfRange[i] = line;
+  });
+}
+
+// テキストエリア内で、指定した行が一番上に来るようスクロールする
+function scrollTabJsonToLine(lineIndex) {
   const lineHeight = parseFloat(getComputedStyle(tabJsonTextarea).lineHeight) || 18;
   const target = Math.max(0, lineIndex * lineHeight);
   tabJsonTextarea.scrollTop = target;
@@ -817,6 +843,16 @@ function scrollTabJsonToOffset(text, offset) {
   requestAnimationFrame(() => {
     tabJsonTextarea.scrollTop = target;
   });
+}
+
+// 再生位置に対応する箇所のハイライトだけを更新する(テキストの再生成・再走査は行わない)
+function syncTabJsonPlayingRange() {
+  if (!tabJsonDetails.open || document.activeElement === tabJsonTextarea) return;
+  if (playingIndex == null) return;
+  const range = tabJsonRanges[playingIndex];
+  if (!range) return;
+  tabJsonTextarea.setSelectionRange(range[0], range[1]);
+  scrollTabJsonToLine(tabJsonLineOfRange[playingIndex]);
 }
 
 function syncTabJsonView() {
@@ -827,18 +863,17 @@ function syncTabJsonView() {
   const text = formatTabDataJson(tabData, state.timeSignature);
   tabJsonTextarea.value = text;
   setTabJsonError('');
+  cacheTabJsonRanges(text);
 
-  const ranges = computeNoteJsonRanges(text);
+  const ranges = tabJsonRanges;
   if (playingIndex != null && ranges[playingIndex]) {
-    const [start, end] = ranges[playingIndex];
-    tabJsonTextarea.setSelectionRange(start, end);
-    scrollTabJsonToOffset(text, start);
+    syncTabJsonPlayingRange();
   } else if (tabSelection) {
     const from = Math.min(tabSelection.start, tabSelection.end);
     const to = Math.max(tabSelection.start, tabSelection.end);
     if (ranges[from] && ranges[to]) {
       tabJsonTextarea.setSelectionRange(ranges[from][0], ranges[to][1]);
-      scrollTabJsonToOffset(text, ranges[from][0]);
+      scrollTabJsonToLine(tabJsonLineOfRange[from]);
     }
   } else {
     tabJsonTextarea.setSelectionRange(0, 0);
