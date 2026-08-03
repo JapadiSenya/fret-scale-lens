@@ -138,8 +138,11 @@ function renderPluckWave(sampleRate, freq, { t60, pluckPosition, noiseAmount, lo
   const mean = sum / lineLength;
   for (let i = 0; i < lineLength; i++) line[i] -= mean;
 
-  // 基音がt60秒で60dB落ちるループゲイン(倍音の減衰はループフィルタ側が受け持つ)
-  const loopGain = Math.pow(10, -3 / (t60 * sampleRate));
+  // 基音がt60秒で60dB落ちるループゲイン(倍音の減衰はループフィルタ側が受け持つ)。
+  // ループゲインは「サンプルごと」ではなく「遅延線を1周するごと」に効く。1周=1周期なので、
+  // t60秒の間に回る回数は t60 * freq 回。ここをサンプル数で割ると減衰がおよそ
+  // sampleRate/freq 倍(低音弦で数百倍)遅くなり、弾いた音がいつまでも減衰せず伸び続ける
+  const loopGain = Math.pow(10, -3 / (t60 * freq));
 
   // 楽器のボディ/ピックアップで高域が丸められるぶんを一次ローパスで近似する
   const toneCoeff = 1 - Math.exp((-2 * Math.PI * toneCutoff) / sampleRate);
