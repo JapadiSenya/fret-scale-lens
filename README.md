@@ -52,7 +52,7 @@
 
 - Vanilla JavaScript(ES Modules)+ HTML + CSS
 - SVGによるフレットボード描画
-- Web Audio API(`OscillatorNode` + `GainNode`)による音声合成・TAB再生スケジューリング
+- Web Audio APIによる音声合成(撥弦音はKarplus-Strong法で合成し音高ごとにキャッシュ)・TAB再生スケジューリング
 - 外部フレームワーク・ビルドツールは不使用
 
 ## ファイル構成
